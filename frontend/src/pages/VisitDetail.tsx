@@ -7,7 +7,8 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 
-import { Button, Card, Layout } from '../components'
+import { AudioRecorder, Button, Card, Layout } from '../components'
+import { uploadAudio } from '../api/visits'
 import { useVisitStore } from '../store/visitStore'
 
 /**
@@ -23,6 +24,20 @@ const formatDate = (dateString: string): string => {
     hour: 'numeric',
     minute: '2-digit',
   })
+}
+
+/**
+ * Format duration in seconds to MM:SS or HH:MM:SS.
+ */
+const formatDuration = (seconds: number): string => {
+  const hrs = Math.floor(seconds / 3600)
+  const mins = Math.floor((seconds % 3600) / 60)
+  const secs = seconds % 60
+
+  if (hrs > 0) {
+    return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+  }
+  return `${mins}:${secs.toString().padStart(2, '0')}`
 }
 
 /**
@@ -55,6 +70,9 @@ export const VisitDetail = () => {
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [uploadError, setUploadError] = useState<string | null>(null)
 
   useEffect(() => {
     if (id) {
@@ -72,6 +90,28 @@ export const VisitDetail = () => {
     }
     setIsDeleting(false)
     setShowDeleteConfirm(false)
+  }
+
+  const handleRecordingComplete = async (blob: Blob) => {
+    if (!id) return
+
+    setIsUploading(true)
+    setUploadProgress(0)
+    setUploadError(null)
+
+    try {
+      await uploadAudio(id, blob, (progress) => {
+        setUploadProgress(progress)
+      })
+      // Refresh visit data to show updated audio info
+      await fetchVisit(id)
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error ? err.message : 'Failed to upload audio'
+      setUploadError(errorMessage)
+    } finally {
+      setIsUploading(false)
+    }
   }
 
   if (isLoading && !currentVisit) {
@@ -177,24 +217,65 @@ export const VisitDetail = () => {
           title="Audio Recording"
           subtitle={
             currentVisit.audio_file_path
-              ? `Duration: ${currentVisit.audio_duration_seconds || 0} seconds`
-              : 'No audio recorded yet'
+              ? `Duration: ${formatDuration(currentVisit.audio_duration_seconds || 0)}`
+              : 'Record audio for this visit'
           }
         >
+          {uploadError && (
+            <div className="mb-4 rounded-md bg-red-50 p-3">
+              <p className="text-sm text-red-700">{uploadError}</p>
+            </div>
+          )}
+
+          {isUploading && (
+            <div className="mb-4">
+              <div className="flex items-center justify-between text-sm text-gray-600">
+                <span>Uploading...</span>
+                <span>{uploadProgress}%</span>
+              </div>
+              <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-gray-200">
+                <div
+                  className="h-full bg-primary-500 transition-all duration-300"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
+
           {currentVisit.audio_file_path ? (
-            <div className="flex items-center gap-4">
-              <div className="flex-1">
-                <p className="text-sm text-gray-500">
-                  Audio file: {currentVisit.audio_file_path}
-                </p>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between rounded-lg bg-green-50 p-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-100">
+                    <svg
+                      className="h-5 w-5 text-green-600"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="font-medium text-green-800">
+                      Audio uploaded successfully
+                    </p>
+                    <p className="text-sm text-green-600">
+                      Duration: {formatDuration(currentVisit.audio_duration_seconds || 0)}
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
           ) : (
-            <div className="rounded-md bg-gray-50 p-4 text-center">
-              <p className="text-sm text-gray-500">
-                Audio recording will be available in Phase 4
-              </p>
-            </div>
+            <AudioRecorder
+              onRecordingComplete={handleRecordingComplete}
+              isUploading={isUploading}
+              maxDurationSeconds={3600}
+            />
           )}
         </Card>
 

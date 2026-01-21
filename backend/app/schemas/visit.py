@@ -67,3 +67,13 @@ class VisitListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class AudioUploadResponse(BaseModel):
+    """Schema for audio upload response."""
+
+    visit_id: uuid.UUID
+    audio_file_path: str
+    audio_duration_seconds: int | None
+    file_size_bytes: int
+    mime_type: str
