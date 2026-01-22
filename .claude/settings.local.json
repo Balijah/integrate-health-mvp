@@ -3,7 +3,11 @@
     "allow": [
       "Bash(docker-compose build:*)",
       "Bash(docker compose build:*)",
-      "mcp__ide__getDiagnostics"
+      "mcp__ide__getDiagnostics",
+      "Bash(docker-compose down:*)",
+      "Bash(docker-compose up:*)",
+      "Bash(curl:*)",
+      "Bash(docker-compose logs:*)"
     ]
   }
 }
