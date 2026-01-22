@@ -19,6 +19,12 @@ from app.services.transcription import (
     transcribe_audio,
     transcribe_audio_file,
 )
+from app.services.note_generation import (
+    NoteGenerationError,
+    generate_soap_note,
+    format_note_as_markdown,
+    format_note_as_text,
+)
 
 __all__ = [
     # Auth
@@ -34,4 +40,9 @@ __all__ = [
     "TranscriptionError",
     "transcribe_audio",
     "transcribe_audio_file",
+    # Note Generation
+    "NoteGenerationError",
+    "generate_soap_note",
+    "format_note_as_markdown",
+    "format_note_as_text",
 ]

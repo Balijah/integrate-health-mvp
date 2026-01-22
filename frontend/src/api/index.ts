@@ -5,3 +5,4 @@
 export * from './auth'
 export * from './client'
 export * from './visits'
+export * from './notes'

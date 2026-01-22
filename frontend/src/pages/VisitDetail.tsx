@@ -7,8 +7,9 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 
-import { AudioRecorder, Button, Card, Layout } from '../components'
+import { AudioRecorder, Button, Card, Layout, NoteEditor } from '../components'
 import { uploadAudio, retryTranscription } from '../api/visits'
+import { generateNote, getNote, NoteResponse } from '../api/notes'
 import { useTranscriptionPolling } from '../hooks'
 import { useVisitStore } from '../store/visitStore'
 
@@ -76,12 +77,54 @@ export const VisitDetail = () => {
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [isRetrying, setIsRetrying] = useState(false)
 
+  // Note state
+  const [note, setNote] = useState<NoteResponse | null>(null)
+  const [isLoadingNote, setIsLoadingNote] = useState(false)
+  const [isGeneratingNote, setIsGeneratingNote] = useState(false)
+  const [noteError, setNoteError] = useState<string | null>(null)
+
+  // Fetch note for visit
+  const fetchNote = useCallback(async () => {
+    if (!id) return
+    setIsLoadingNote(true)
+    try {
+      const noteData = await getNote(id)
+      setNote(noteData)
+    } catch (err) {
+      // Note might not exist yet, which is fine
+      setNote(null)
+    } finally {
+      setIsLoadingNote(false)
+    }
+  }, [id])
+
   // Callback when transcription completes
   const handleTranscriptionComplete = useCallback(() => {
     if (id) {
       fetchVisit(id)
     }
   }, [id, fetchVisit])
+
+  // Handle note generation
+  const handleGenerateNote = async () => {
+    if (!id) return
+    setIsGeneratingNote(true)
+    setNoteError(null)
+    try {
+      await generateNote(id)
+      // Fetch the generated note
+      await fetchNote()
+    } catch (err) {
+      setNoteError(err instanceof Error ? err.message : 'Failed to generate note')
+    } finally {
+      setIsGeneratingNote(false)
+    }
+  }
+
+  // Handle note update
+  const handleNoteUpdate = (updatedNote: NoteResponse) => {
+    setNote(updatedNote)
+  }
 
   // Transcription status polling
   const {
@@ -98,9 +141,10 @@ export const VisitDetail = () => {
   useEffect(() => {
     if (id) {
       fetchVisit(id)
+      fetchNote()
     }
     return () => clearCurrentVisit()
-  }, [id, fetchVisit, clearCurrentVisit])
+  }, [id, fetchVisit, fetchNote, clearCurrentVisit])
 
   // Handle retry transcription
   const handleRetryTranscription = async () => {
@@ -405,16 +449,103 @@ export const VisitDetail = () => {
           )}
         </Card>
 
-        {/* SOAP Note Placeholder */}
+        {/* SOAP Note */}
         <Card
           title="SOAP Note"
-          subtitle="Generated note will appear here"
+          subtitle={
+            note
+              ? `Status: ${note.status}`
+              : isGeneratingNote
+              ? 'Generating note...'
+              : 'Generate a structured SOAP note from the transcript'
+          }
         >
-          <div className="rounded-md bg-gray-50 p-4 text-center">
-            <p className="text-sm text-gray-500">
-              SOAP note generation will be available in Phase 6
-            </p>
-          </div>
+          {/* Error message */}
+          {noteError && (
+            <div className="mb-4 rounded-md bg-red-50 p-3">
+              <p className="text-sm text-red-700">{noteError}</p>
+            </div>
+          )}
+
+          {/* Loading note */}
+          {isLoadingNote && !note && (
+            <div className="flex items-center justify-center py-8">
+              <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary-500 border-t-transparent"></div>
+            </div>
+          )}
+
+          {/* Generating note */}
+          {isGeneratingNote && (
+            <div className="flex flex-col items-center justify-center py-8">
+              <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary-500 border-t-transparent"></div>
+              <p className="mt-4 text-sm text-gray-600">
+                Generating SOAP note with AI...
+              </p>
+              <p className="mt-1 text-xs text-gray-400">
+                This may take a moment
+              </p>
+            </div>
+          )}
+
+          {/* Note exists - show editor */}
+          {note && !isGeneratingNote && (
+            <NoteEditor
+              note={note}
+              visitId={id!}
+              onUpdate={handleNoteUpdate}
+            />
+          )}
+
+          {/* No note yet - show generate button */}
+          {!note && !isLoadingNote && !isGeneratingNote && (
+            <div className="rounded-md bg-gray-50 p-6 text-center">
+              {currentVisit.transcription_status === 'completed' && currentVisit.transcript ? (
+                <div>
+                  <svg
+                    className="mx-auto h-12 w-12 text-gray-400"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={1.5}
+                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                    />
+                  </svg>
+                  <p className="mt-3 text-sm text-gray-600">
+                    Transcript is ready. Generate a structured SOAP note.
+                  </p>
+                  <Button
+                    className="mt-4"
+                    onClick={handleGenerateNote}
+                  >
+                    Generate SOAP Note
+                  </Button>
+                </div>
+              ) : (
+                <div>
+                  <svg
+                    className="mx-auto h-12 w-12 text-gray-300"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={1.5}
+                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                    />
+                  </svg>
+                  <p className="mt-3 text-sm text-gray-500">
+                    SOAP note can be generated after transcription is complete
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </Card>
 
         {/* Actions */}

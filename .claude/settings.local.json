@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(docker-compose build:*)",
-      "Bash(docker compose build:*)"
+      "Bash(docker compose build:*)",
+      "mcp__ide__getDiagnostics"
     ]
   }
 }
