@@ -61,10 +61,11 @@ async def root() -> dict:
 
 
 # API routes
-from app.api import auth, visits
+from app.api import auth, visits, transcription
 
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(visits.router, prefix="/api/v1/visits", tags=["visits"])
+app.include_router(transcription.router, prefix="/api/v1/visits", tags=["transcription"])
 
 # Future routes (will be added in later phases)
 # from app.api import notes

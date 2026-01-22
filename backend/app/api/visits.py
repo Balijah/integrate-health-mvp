@@ -7,7 +7,7 @@ Handles CRUD operations for patient visits and audio upload.
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession
@@ -260,6 +260,7 @@ async def upload_audio(
     visit_id: uuid.UUID,
     current_user: CurrentUser,
     db: DbSession,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="Audio file to upload"),
 ) -> AudioUploadResponse:
     """
@@ -333,6 +334,11 @@ async def upload_audio(
 
     await db.flush()
     await db.refresh(visit)
+
+    # Automatically trigger transcription in the background
+    from app.api.transcription import process_transcription
+
+    background_tasks.add_task(process_transcription, visit_id, settings.database_url)
 
     return AudioUploadResponse(
         visit_id=visit.id,

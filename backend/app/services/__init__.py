@@ -14,8 +14,14 @@ from app.services.auth import (
     hash_password,
     verify_password,
 )
+from app.services.transcription import (
+    TranscriptionError,
+    transcribe_audio,
+    transcribe_audio_file,
+)
 
 __all__ = [
+    # Auth
     "hash_password",
     "verify_password",
     "create_access_token",
@@ -24,4 +30,8 @@ __all__ = [
     "get_user_by_email",
     "get_user_by_id",
     "create_user",
+    # Transcription
+    "TranscriptionError",
+    "transcribe_audio",
+    "transcribe_audio_file",
 ]

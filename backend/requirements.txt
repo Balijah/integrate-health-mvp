@@ -26,6 +26,6 @@ httpx==0.26.0
 # Utilities
 python-dotenv==1.0.1
 
-# External Services (will add when needed in Phase 5-6)
-# deepgram-sdk==3.2.0
-# anthropic==0.18.0
+# External Services
+deepgram-sdk==3.2.0
+# anthropic==0.18.0  # Will enable in Phase 6

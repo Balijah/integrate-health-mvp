@@ -4,11 +4,12 @@
  * Shows details of a single visit with options to record audio and view transcript.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 
 import { AudioRecorder, Button, Card, Layout } from '../components'
-import { uploadAudio } from '../api/visits'
+import { uploadAudio, retryTranscription } from '../api/visits'
+import { useTranscriptionPolling } from '../hooks'
 import { useVisitStore } from '../store/visitStore'
 
 /**
@@ -73,6 +74,26 @@ export const VisitDetail = () => {
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [isRetrying, setIsRetrying] = useState(false)
+
+  // Callback when transcription completes
+  const handleTranscriptionComplete = useCallback(() => {
+    if (id) {
+      fetchVisit(id)
+    }
+  }, [id, fetchVisit])
+
+  // Transcription status polling
+  const {
+    status: transcriptionStatus,
+    isPolling,
+    error: transcriptionError,
+    startPolling,
+  } = useTranscriptionPolling({
+    visitId: currentVisit?.audio_file_path ? id ?? null : null,
+    enabled: Boolean(currentVisit?.audio_file_path),
+    onComplete: handleTranscriptionComplete,
+  })
 
   useEffect(() => {
     if (id) {
@@ -80,6 +101,21 @@ export const VisitDetail = () => {
     }
     return () => clearCurrentVisit()
   }, [id, fetchVisit, clearCurrentVisit])
+
+  // Handle retry transcription
+  const handleRetryTranscription = async () => {
+    if (!id) return
+    setIsRetrying(true)
+    try {
+      await retryTranscription(id)
+      startPolling()
+      await fetchVisit(id)
+    } catch (err) {
+      console.error('Failed to retry transcription:', err)
+    } finally {
+      setIsRetrying(false)
+    }
+  }
 
   const handleDelete = async () => {
     if (!id) return
@@ -285,22 +321,85 @@ export const VisitDetail = () => {
           subtitle={
             currentVisit.transcription_status === 'completed'
               ? 'Transcription complete'
-              : currentVisit.transcription_status === 'transcribing'
+              : currentVisit.transcription_status === 'transcribing' || isPolling
               ? 'Transcription in progress...'
+              : currentVisit.transcription_status === 'failed'
+              ? 'Transcription failed'
               : 'Awaiting audio upload'
           }
         >
-          {currentVisit.transcript ? (
-            <div className="prose max-w-none">
-              <p className="whitespace-pre-wrap text-gray-700">
-                {currentVisit.transcript}
+          {/* Transcription in progress */}
+          {(currentVisit.transcription_status === 'transcribing' || isPolling) && (
+            <div className="flex flex-col items-center justify-center py-8">
+              <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary-500 border-t-transparent"></div>
+              <p className="mt-4 text-sm text-gray-600">
+                Transcribing audio with AI...
+              </p>
+              <p className="mt-1 text-xs text-gray-400">
+                This may take a few moments
               </p>
             </div>
-          ) : (
+          )}
+
+          {/* Transcription failed */}
+          {currentVisit.transcription_status === 'failed' && !isPolling && (
+            <div className="rounded-md bg-red-50 p-4">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-red-100">
+                  <svg
+                    className="h-5 w-5 text-red-600"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <p className="font-medium text-red-800">Transcription failed</p>
+                  <p className="mt-1 text-sm text-red-600">
+                    {transcriptionError || 'An error occurred during transcription. Please try again.'}
+                  </p>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="mt-3"
+                    onClick={handleRetryTranscription}
+                    isLoading={isRetrying}
+                  >
+                    Retry Transcription
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Transcription completed */}
+          {currentVisit.transcription_status === 'completed' && currentVisit.transcript && (
+            <div className="prose max-w-none">
+              <div className="whitespace-pre-wrap rounded-lg bg-gray-50 p-4 text-gray-700">
+                {currentVisit.transcript}
+              </div>
+            </div>
+          )}
+
+          {/* Pending - no audio yet */}
+          {currentVisit.transcription_status === 'pending' && !currentVisit.audio_file_path && (
             <div className="rounded-md bg-gray-50 p-4 text-center">
               <p className="text-sm text-gray-500">
-                Transcript will appear here after audio is uploaded and
-                transcribed
+                Transcript will appear here after audio is uploaded and transcribed
+              </p>
+            </div>
+          )}
+
+          {/* Pending - audio uploaded, waiting for transcription to start */}
+          {currentVisit.transcription_status === 'pending' && currentVisit.audio_file_path && !isPolling && (
+            <div className="rounded-md bg-yellow-50 p-4 text-center">
+              <p className="text-sm text-yellow-700">
+                Audio uploaded. Transcription will begin shortly...
               </p>
             </div>
           )}

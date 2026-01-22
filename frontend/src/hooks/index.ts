@@ -3,3 +3,4 @@
  */
 
 export * from './useAudioRecorder'
+export * from './useTranscriptionPolling'

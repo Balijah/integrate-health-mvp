@@ -63,6 +63,25 @@ export interface AudioUploadResponse {
 }
 
 /**
+ * Transcription status response.
+ */
+export interface TranscriptionStatusResponse {
+  visit_id: string
+  status: 'pending' | 'transcribing' | 'completed' | 'failed'
+  transcript: string | null
+  error_message: string | null
+}
+
+/**
+ * Transcription trigger response.
+ */
+export interface TranscribeResponse {
+  visit_id: string
+  status: string
+  message: string
+}
+
+/**
  * Create a new visit.
  *
  * @param data - Visit creation data
@@ -174,5 +193,50 @@ export const uploadAudio = async (
     }
   )
 
+  return response.data
+}
+
+/**
+ * Get transcription status for a visit.
+ *
+ * @param visitId - Visit ID
+ * @returns Transcription status
+ */
+export const getTranscriptionStatus = async (
+  visitId: string
+): Promise<TranscriptionStatusResponse> => {
+  const response = await apiClient.get<TranscriptionStatusResponse>(
+    `/visits/${visitId}/transcription/status`
+  )
+  return response.data
+}
+
+/**
+ * Trigger transcription for a visit.
+ *
+ * @param visitId - Visit ID
+ * @returns Transcription trigger response
+ */
+export const triggerTranscription = async (
+  visitId: string
+): Promise<TranscribeResponse> => {
+  const response = await apiClient.post<TranscribeResponse>(
+    `/visits/${visitId}/transcribe`
+  )
+  return response.data
+}
+
+/**
+ * Retry failed transcription for a visit.
+ *
+ * @param visitId - Visit ID
+ * @returns Transcription retry response
+ */
+export const retryTranscription = async (
+  visitId: string
+): Promise<TranscribeResponse> => {
+  const response = await apiClient.post<TranscribeResponse>(
+    `/visits/${visitId}/transcription/retry`
+  )
   return response.data
 }

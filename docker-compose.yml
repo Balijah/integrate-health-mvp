@@ -28,6 +28,8 @@ services:
       - APP_SECRET_KEY=${APP_SECRET_KEY:-dev-secret-key-change-in-production-min32}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev-jwt-secret-key-change-in-prod-min32}
       - DEBUG=${DEBUG:-true}
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     volumes:
       - ./backend:/app
       - ./uploads:/app/uploads
