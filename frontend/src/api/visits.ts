@@ -37,6 +37,8 @@ export interface VisitResponse {
   audio_duration_seconds: number | null
   transcript: string | null
   transcription_status: string
+  is_live_transcription: boolean
+  transcription_session_id: string | null
   created_at: string
   updated_at: string
 }

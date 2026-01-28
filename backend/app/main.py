@@ -61,9 +61,12 @@ async def root() -> dict:
 
 
 # API routes
-from app.api import auth, visits, transcription, notes
+from app.api import auth, visits, transcription, notes, websockets
 
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(visits.router, prefix="/api/v1/visits", tags=["visits"])
 app.include_router(transcription.router, prefix="/api/v1/visits", tags=["transcription"])
 app.include_router(notes.router, prefix="/api/v1/visits", tags=["notes"])
+
+# WebSocket routes (no prefix - uses /ws/*)
+app.include_router(websockets.router, tags=["websockets"])

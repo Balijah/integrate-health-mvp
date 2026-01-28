@@ -8,6 +8,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 
 import { AudioRecorder, Button, Card, Layout, NoteEditor } from '../components'
+import { LiveRecorder } from '../components/LiveRecorder'
 import { uploadAudio, retryTranscription } from '../api/visits'
 import { generateNote, getNote, NoteResponse } from '../api/notes'
 import { useTranscriptionPolling } from '../hooks'
@@ -77,6 +78,9 @@ export const VisitDetail = () => {
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [isRetrying, setIsRetrying] = useState(false)
 
+  // Recording mode: 'upload' for traditional recording, 'live' for live transcription
+  const [recordingMode, setRecordingMode] = useState<'upload' | 'live'>('live')
+
   // Note state
   const [note, setNote] = useState<NoteResponse | null>(null)
   const [isLoadingNote, setIsLoadingNote] = useState(false)
@@ -128,7 +132,6 @@ export const VisitDetail = () => {
 
   // Transcription status polling
   const {
-    status: transcriptionStatus,
     isPolling,
     error: transcriptionError,
     startPolling,
@@ -192,6 +195,21 @@ export const VisitDetail = () => {
     } finally {
       setIsUploading(false)
     }
+  }
+
+  // Handle live transcription complete
+  const handleLiveTranscriptionComplete = async (transcript: string) => {
+    console.log('Live transcription complete:', transcript.substring(0, 100) + '...')
+    // Refresh visit data to show transcript
+    if (id) {
+      await fetchVisit(id)
+      await fetchNote()
+    }
+  }
+
+  const handleLiveTranscriptionError = (error: string) => {
+    console.error('Live transcription error:', error)
+    setUploadError(error)
   }
 
   if (isLoading && !currentVisit) {
@@ -296,7 +314,7 @@ export const VisitDetail = () => {
         <Card
           title="Audio Recording"
           subtitle={
-            currentVisit.audio_file_path
+            currentVisit.audio_file_path || currentVisit.transcript
               ? `Duration: ${formatDuration(currentVisit.audio_duration_seconds || 0)}`
               : 'Record audio for this visit'
           }
@@ -322,7 +340,7 @@ export const VisitDetail = () => {
             </div>
           )}
 
-          {currentVisit.audio_file_path ? (
+          {currentVisit.audio_file_path || currentVisit.transcript ? (
             <div className="space-y-3">
               <div className="flex items-center justify-between rounded-lg bg-green-50 p-4">
                 <div className="flex items-center gap-3">
@@ -341,7 +359,9 @@ export const VisitDetail = () => {
                   </div>
                   <div>
                     <p className="font-medium text-green-800">
-                      Audio uploaded successfully
+                      {currentVisit.is_live_transcription
+                        ? 'Live transcription complete'
+                        : 'Audio uploaded successfully'}
                     </p>
                     <p className="text-sm text-green-600">
                       Duration: {formatDuration(currentVisit.audio_duration_seconds || 0)}
@@ -351,11 +371,53 @@ export const VisitDetail = () => {
               </div>
             </div>
           ) : (
-            <AudioRecorder
-              onRecordingComplete={handleRecordingComplete}
-              isUploading={isUploading}
-              maxDurationSeconds={3600}
-            />
+            <div className="space-y-4">
+              {/* Recording Mode Toggle */}
+              <div className="flex items-center justify-center gap-1 rounded-lg bg-gray-100 p-1">
+                <button
+                  onClick={() => setRecordingMode('live')}
+                  className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+                    recordingMode === 'live'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  Live Transcription
+                </button>
+                <button
+                  onClick={() => setRecordingMode('upload')}
+                  className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+                    recordingMode === 'upload'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  Record & Upload
+                </button>
+              </div>
+
+              {/* Mode Description */}
+              <p className="text-center text-xs text-gray-500">
+                {recordingMode === 'live'
+                  ? 'Real-time transcription as you speak - see text appear instantly'
+                  : 'Record audio first, then upload for transcription'}
+              </p>
+
+              {/* Recorder Component */}
+              {recordingMode === 'live' ? (
+                <LiveRecorder
+                  visitId={id!}
+                  onComplete={handleLiveTranscriptionComplete}
+                  onError={handleLiveTranscriptionError}
+                />
+              ) : (
+                <AudioRecorder
+                  onRecordingComplete={handleRecordingComplete}
+                  isUploading={isUploading}
+                  maxDurationSeconds={3600}
+                />
+              )}
+            </div>
           )}
         </Card>
 

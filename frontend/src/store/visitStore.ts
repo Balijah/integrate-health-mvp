@@ -75,7 +75,7 @@ const initialState: VisitState = {
 /**
  * Visit store.
  */
-export const useVisitStore = create<VisitStore>((set, get) => ({
+export const useVisitStore = create<VisitStore>((set) => ({
   ...initialState,
 
   fetchVisits: async (limit = 20, offset = 0) => {

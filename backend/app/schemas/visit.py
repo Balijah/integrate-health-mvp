@@ -54,6 +54,8 @@ class VisitResponse(BaseModel):
     audio_duration_seconds: int | None
     transcript: str | None
     transcription_status: str
+    is_live_transcription: bool
+    transcription_session_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
 

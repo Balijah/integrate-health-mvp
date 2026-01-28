@@ -7,7 +7,7 @@ Stores visit information including audio files and transcripts.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -78,6 +78,16 @@ class Visit(Base):
         server_default="pending",
         index=True,
     )
+    is_live_transcription: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="false",
+    )
+    transcription_session_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("transcription_sessions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -97,6 +107,12 @@ class Visit(Base):
         "Note",
         back_populates="visit",
         cascade="all, delete-orphan",
+    )
+    transcription_sessions: Mapped[list["TranscriptionSession"]] = relationship(
+        "TranscriptionSession",
+        back_populates="visit",
+        cascade="all, delete-orphan",
+        foreign_keys="[TranscriptionSession.visit_id]",
     )
 
     def __repr__(self) -> str:
