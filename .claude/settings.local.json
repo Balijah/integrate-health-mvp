@@ -13,7 +13,9 @@
       "Bash(python3:*)",
       "Bash(docker-compose exec:*)",
       "Bash(docker-compose restart:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(docker compose ps:*)",
+      "Bash(docker compose exec:*)"
     ]
   }
 }

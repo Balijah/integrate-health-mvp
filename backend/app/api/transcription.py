@@ -145,7 +145,7 @@ async def _process_transcription_async(visit_id: uuid.UUID, db_url: str) -> None
             logger.info(f"Transcription completed for visit {visit_id}")
 
         except TranscriptionError as e:
-            logger.error(f"Transcription failed for visit {visit_id}: {str(e)}")
+            logger.error(f"Transcription failed for visit {visit_id}")
             try:
                 visit.transcription_status = "failed"
                 await db.commit()
@@ -153,7 +153,7 @@ async def _process_transcription_async(visit_id: uuid.UUID, db_url: str) -> None
                 pass
 
         except Exception as e:
-            logger.error(f"Unexpected error transcribing visit {visit_id}: {str(e)}", exc_info=True)
+            logger.error(f"Unexpected error transcribing visit {visit_id}: {type(e).__name__}")
             try:
                 visit.transcription_status = "failed"
                 await db.commit()

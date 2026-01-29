@@ -163,7 +163,7 @@ class LiveTranscriptionService:
 
                     # Add to session (thread-safe)
                     session.add_transcript(transcript_data)
-                    logger.debug(f"Transcript: {transcript_text[:50]}... (final={result.is_final})")
+                    logger.debug(f"Transcript received (length={len(transcript_text)}, final={result.is_final})")
 
                 except Exception as e:
                     logger.error(f"Error processing transcript: {e}")
@@ -213,8 +213,8 @@ class LiveTranscriptionService:
             return session
 
         except Exception as e:
-            logger.error(f"Failed to start live transcription session: {e}")
-            raise LiveTranscriptionError(f"Failed to start session: {e}") from e
+            logger.error(f"Failed to start live transcription session: {type(e).__name__}")
+            raise LiveTranscriptionError("Failed to start transcription session") from e
 
     def send_audio_chunk(self, session_id: str, audio_data: bytes) -> bool:
         """

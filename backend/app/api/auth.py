@@ -4,7 +4,9 @@ Authentication API endpoints.
 Handles user registration, login, and current user retrieval.
 """
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.api.deps import CurrentUser, DbSession
 from app.schemas.auth import LoginRequest, TokenResponse
@@ -17,6 +19,7 @@ from app.services.auth import (
 )
 
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
 
 
 @router.post(
@@ -26,7 +29,9 @@ router = APIRouter()
     summary="Register a new user",
     description="Create a new user account with email, password, and full name.",
 )
+@limiter.limit("3/minute")
 async def register(
+    request: Request,
     user_data: UserCreate,
     db: DbSession,
 ) -> UserResponse:
@@ -68,7 +73,9 @@ async def register(
     summary="Login to get access token",
     description="Authenticate with email and password to receive a JWT token.",
 )
+@limiter.limit("5/minute")
 async def login(
+    request: Request,
     credentials: LoginRequest,
     db: DbSession,
 ) -> TokenResponse:

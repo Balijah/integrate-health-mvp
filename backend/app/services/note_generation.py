@@ -145,7 +145,7 @@ def generate_soap_note(transcript: str, additional_context: str | None = None) -
         try:
             soap_content = json.loads(response_text)
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse Claude response as JSON: {response_text[:500]}")
+            logger.error(f"Failed to parse Claude response as JSON (length={len(response_text)})")
             raise NoteGenerationError(f"Failed to parse generated note: {str(e)}")
 
         # Add metadata
@@ -167,12 +167,12 @@ def generate_soap_note(transcript: str, additional_context: str | None = None) -
         raise NoteGenerationError("AI service rate limit exceeded. Please try again later.")
 
     except anthropic.APIStatusError as e:
-        logger.error(f"Anthropic API error: {str(e)}")
-        raise NoteGenerationError(f"AI service error: {str(e)}")
+        logger.error(f"Anthropic API error (status={e.status_code})")
+        raise NoteGenerationError("AI service error. Please try again.")
 
     except Exception as e:
-        logger.error(f"Unexpected error generating note: {str(e)}")
-        raise NoteGenerationError(f"Failed to generate note: {str(e)}")
+        logger.error(f"Unexpected error generating note: {type(e).__name__}")
+        raise NoteGenerationError("Failed to generate note. Please try again.")
 
 
 def format_note_as_markdown(content: dict) -> str:

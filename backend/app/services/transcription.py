@@ -122,8 +122,8 @@ def transcribe_audio(audio_bytes: bytes, mime_type: str) -> dict:
         }
 
     except Exception as e:
-        logger.error(f"Transcription failed: {str(e)}")
-        raise TranscriptionError(f"Transcription failed: {str(e)}") from e
+        logger.error(f"Transcription failed: {type(e).__name__}")
+        raise TranscriptionError("Transcription failed. Please try again.") from e
 
 
 def transcribe_audio_file(file_path: str) -> dict:

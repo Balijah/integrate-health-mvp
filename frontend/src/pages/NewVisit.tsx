@@ -8,10 +8,12 @@ import { useState, FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { Button, Card, Input, Layout } from '../components'
+import { useToast } from '../components/Toast'
 import { useVisitStore } from '../store/visitStore'
 
 export const NewVisit = () => {
   const navigate = useNavigate()
+  const toast = useToast()
   const { createVisit, isLoading, error, clearError } = useVisitStore()
 
   const [patientRef, setPatientRef] = useState('')
@@ -35,7 +37,10 @@ export const NewVisit = () => {
     })
 
     if (visit) {
+      toast.success('Visit created successfully')
       navigate(`/visits/${visit.id}`)
+    } else if (error) {
+      toast.error(error)
     }
   }
 

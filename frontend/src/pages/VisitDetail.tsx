@@ -9,6 +9,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 
 import { AudioRecorder, Button, Card, Layout, NoteEditor } from '../components'
 import { LiveRecorder } from '../components/LiveRecorder'
+import { useToast } from '../components/Toast'
 import { uploadAudio, retryTranscription } from '../api/visits'
 import { generateNote, getNote, NoteResponse } from '../api/notes'
 import { useTranscriptionPolling } from '../hooks'
@@ -62,6 +63,7 @@ const getStatusColor = (status: string): string => {
 export const VisitDetail = () => {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const toast = useToast()
   const {
     currentVisit,
     isLoading,
@@ -118,8 +120,11 @@ export const VisitDetail = () => {
       await generateNote(id)
       // Fetch the generated note
       await fetchNote()
+      toast.success('SOAP note generated successfully')
     } catch (err) {
-      setNoteError(err instanceof Error ? err.message : 'Failed to generate note')
+      const errorMsg = err instanceof Error ? err.message : 'Failed to generate note'
+      setNoteError(errorMsg)
+      toast.error(errorMsg)
     } finally {
       setIsGeneratingNote(false)
     }
@@ -169,7 +174,10 @@ export const VisitDetail = () => {
     setIsDeleting(true)
     const success = await deleteVisit(id)
     if (success) {
+      toast.success('Visit deleted successfully')
       navigate('/dashboard')
+    } else {
+      toast.error('Failed to delete visit')
     }
     setIsDeleting(false)
     setShowDeleteConfirm(false)
@@ -188,10 +196,12 @@ export const VisitDetail = () => {
       })
       // Refresh visit data to show updated audio info
       await fetchVisit(id)
+      toast.success('Audio uploaded successfully')
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : 'Failed to upload audio'
       setUploadError(errorMessage)
+      toast.error(errorMessage)
     } finally {
       setIsUploading(false)
     }
@@ -199,7 +209,8 @@ export const VisitDetail = () => {
 
   // Handle live transcription complete
   const handleLiveTranscriptionComplete = async (transcript: string) => {
-    console.log('Live transcription complete:', transcript.substring(0, 100) + '...')
+    // Note: Do not log transcript content (PHI)
+    toast.success('Live transcription completed')
     // Refresh visit data to show transcript
     if (id) {
       await fetchVisit(id)
@@ -207,9 +218,10 @@ export const VisitDetail = () => {
     }
   }
 
-  const handleLiveTranscriptionError = (error: string) => {
-    console.error('Live transcription error:', error)
-    setUploadError(error)
+  const handleLiveTranscriptionError = (errorMsg: string) => {
+    console.error('Live transcription error:', errorMsg)
+    setUploadError(errorMsg)
+    toast.error(errorMsg)
   }
 
   if (isLoading && !currentVisit) {
@@ -265,40 +277,42 @@ export const VisitDetail = () => {
   return (
     <Layout>
       {/* Header */}
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <button
-            onClick={() => navigate('/dashboard')}
-            className="mb-2 flex items-center text-sm text-gray-500 hover:text-gray-700"
+      <div className="mb-6">
+        <button
+          onClick={() => navigate('/dashboard')}
+          className="mb-2 flex items-center text-sm text-gray-500 hover:text-gray-700"
+        >
+          <svg
+            className="mr-1 h-4 w-4"
+            viewBox="0 0 20 20"
+            fill="currentColor"
           >
-            <svg
-              className="mr-1 h-4 w-4"
-              viewBox="0 0 20 20"
-              fill="currentColor"
+            <path
+              fillRule="evenodd"
+              d="M12.79 5.23a.75.75 0 01-.02 1.06L8.832 10l3.938 3.71a.75.75 0 11-1.04 1.08l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 011.06.02z"
+              clipRule="evenodd"
+            />
+          </svg>
+          Back to Visits
+        </button>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">
+              {currentVisit.patient_ref}
+            </h1>
+            <p className="mt-1 text-sm text-gray-500">
+              {formatDate(currentVisit.visit_date)}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span
+              className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-medium ${getStatusColor(
+                currentVisit.transcription_status
+              )}`}
             >
-              <path
-                fillRule="evenodd"
-                d="M12.79 5.23a.75.75 0 01-.02 1.06L8.832 10l3.938 3.71a.75.75 0 11-1.04 1.08l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 011.06.02z"
-                clipRule="evenodd"
-              />
-            </svg>
-            Back to Visits
-          </button>
-          <h1 className="text-2xl font-bold text-gray-900">
-            {currentVisit.patient_ref}
-          </h1>
-          <p className="mt-1 text-sm text-gray-500">
-            {formatDate(currentVisit.visit_date)}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <span
-            className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-medium ${getStatusColor(
-              currentVisit.transcription_status
-            )}`}
-          >
-            {currentVisit.transcription_status}
-          </span>
+              {currentVisit.transcription_status}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -612,7 +626,7 @@ export const VisitDetail = () => {
 
         {/* Actions */}
         <Card padding="sm">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-gray-500">
               Created: {formatDate(currentVisit.created_at)}
             </p>
@@ -620,6 +634,7 @@ export const VisitDetail = () => {
               variant="danger"
               size="sm"
               onClick={() => setShowDeleteConfirm(true)}
+              className="w-full sm:w-auto"
             >
               Delete Visit
             </Button>

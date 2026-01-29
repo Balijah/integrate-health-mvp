@@ -7,6 +7,7 @@
 import { useState, useCallback } from 'react'
 
 import { Button } from '../common/Button'
+import { useToast } from '../Toast'
 import { SOAPContent, NoteResponse, updateNote, exportNote } from '../../api/notes'
 
 interface NoteEditorProps {
@@ -176,6 +177,7 @@ export const NoteEditor = ({
   onUpdate,
   disabled = false,
 }: NoteEditorProps) => {
+  const toast = useToast()
   const [content, setContent] = useState<SOAPContent>(note.content)
   const [status, setStatus] = useState(note.status)
   const [isSaving, setIsSaving] = useState(false)
@@ -223,8 +225,11 @@ export const NoteEditor = ({
       const updated = await updateNote(visitId, note.id, { content, status })
       setHasChanges(false)
       onUpdate?.(updated)
+      toast.success('Note saved successfully')
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Failed to save')
+      const errorMsg = err instanceof Error ? err.message : 'Failed to save'
+      setSaveError(errorMsg)
+      toast.error(errorMsg)
     } finally {
       setIsSaving(false)
     }
@@ -243,8 +248,11 @@ export const NoteEditor = ({
       setStatus('reviewed')
       setHasChanges(false)
       onUpdate?.(updated)
+      toast.success('Note marked as reviewed')
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Failed to update status')
+      const errorMsg = err instanceof Error ? err.message : 'Failed to update status'
+      setSaveError(errorMsg)
+      toast.error(errorMsg)
     } finally {
       setIsSaving(false)
     }
@@ -259,9 +267,9 @@ export const NoteEditor = ({
 
       // Copy to clipboard
       await navigator.clipboard.writeText(result.content)
-      alert(`Note copied to clipboard as ${format}!`)
+      toast.success(`Note copied to clipboard as ${format}`)
     } catch (err) {
-      alert('Failed to export note')
+      toast.error('Failed to export note')
     } finally {
       setIsExporting(false)
     }
@@ -272,16 +280,16 @@ export const NoteEditor = ({
     try {
       const result = await exportNote(visitId, note.id, 'markdown')
       await navigator.clipboard.writeText(result.content)
-      alert('Note copied to clipboard!')
+      toast.success('Note copied to clipboard')
     } catch (err) {
-      alert('Failed to copy note')
+      toast.error('Failed to copy note')
     }
   }
 
   return (
     <div className="space-y-4">
       {/* Status bar */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <span
             className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-medium ${
@@ -299,7 +307,7 @@ export const NoteEditor = ({
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="secondary"
             size="sm"
@@ -418,7 +426,7 @@ export const NoteEditor = ({
         isOpen={openSections.objective}
         onToggle={() => toggleSection('objective')}
       >
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <TextField
             label="Blood Pressure"
             value={content.objective.vitals.blood_pressure}

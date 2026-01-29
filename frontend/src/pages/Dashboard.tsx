@@ -51,15 +51,15 @@ export const Dashboard = () => {
   return (
     <Layout>
       {/* Header */}
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Visits</h1>
           <p className="mt-1 text-sm text-gray-500">
             {total} total visit{total !== 1 ? 's' : ''}
           </p>
         </div>
-        <Link to="/visits/new">
-          <Button>New Visit</Button>
+        <Link to="/visits/new" className="w-full sm:w-auto">
+          <Button className="w-full sm:w-auto">New Visit</Button>
         </Link>
       </div>
 
