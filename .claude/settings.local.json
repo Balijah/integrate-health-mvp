@@ -15,7 +15,16 @@
       "Bash(docker-compose restart:*)",
       "Bash(grep:*)",
       "Bash(docker compose ps:*)",
-      "Bash(docker compose exec:*)"
+      "Bash(docker compose exec:*)",
+      "Bash(chmod:*)",
+      "Bash(python scripts/test_pipeline_costs.py:*)",
+      "WebSearch",
+      "WebFetch(domain:www.assemblyai.com)",
+      "WebFetch(domain:openai.com)",
+      "WebFetch(domain:platform.openai.com)",
+      "WebFetch(domain:aws.amazon.com)",
+      "WebFetch(domain:deepgram.com)",
+      "WebFetch(domain:github.com)"
     ]
   }
 }

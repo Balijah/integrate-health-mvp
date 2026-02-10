@@ -6,6 +6,7 @@ Generates structured SOAP notes from visit transcripts.
 
 import json
 import logging
+import re
 from datetime import datetime, timezone
 
 import anthropic
@@ -88,6 +89,68 @@ Generate the SOAP note in this exact JSON structure:
 Respond with ONLY the JSON object, no additional text."""
 
 
+def _extract_json_from_response(response_text: str) -> dict:
+    """
+    Extract JSON from Claude's response, handling various formats.
+
+    Claude may return JSON wrapped in markdown code blocks or with extra text.
+    This function attempts multiple strategies to extract valid JSON.
+
+    Args:
+        response_text: The raw response text from Claude.
+
+    Returns:
+        Parsed JSON as a dict.
+
+    Raises:
+        json.JSONDecodeError: If no valid JSON could be extracted.
+    """
+    # Strategy 1: Try parsing directly
+    try:
+        return json.loads(response_text)
+    except json.JSONDecodeError:
+        pass
+
+    # Strategy 2: Extract from markdown code blocks (```json ... ``` or ``` ... ```)
+    code_block_patterns = [
+        r'```json\s*([\s\S]*?)\s*```',  # ```json ... ```
+        r'```\s*([\s\S]*?)\s*```',       # ``` ... ```
+    ]
+
+    for pattern in code_block_patterns:
+        match = re.search(pattern, response_text)
+        if match:
+            try:
+                return json.loads(match.group(1))
+            except json.JSONDecodeError:
+                continue
+
+    # Strategy 3: Find JSON object by locating first { and last }
+    first_brace = response_text.find('{')
+    last_brace = response_text.rfind('}')
+
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        potential_json = response_text[first_brace:last_brace + 1]
+        try:
+            return json.loads(potential_json)
+        except json.JSONDecodeError:
+            pass
+
+    # Strategy 4: Strip common prefixes/suffixes and try again
+    cleaned = response_text.strip()
+    for prefix in ["Here is the SOAP note:", "Here's the SOAP note:", "SOAP Note:"]:
+        if cleaned.lower().startswith(prefix.lower()):
+            cleaned = cleaned[len(prefix):].strip()
+
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+
+    # If all strategies fail, raise the original error
+    raise json.JSONDecodeError("Could not extract valid JSON from response", response_text, 0)
+
+
 def generate_soap_note(transcript: str, additional_context: str | None = None) -> dict:
     """
     Generate a SOAP note from a transcript using Claude.
@@ -141,18 +204,29 @@ def generate_soap_note(transcript: str, additional_context: str | None = None) -
         # Extract response text
         response_text = message.content[0].text
 
-        # Parse JSON response
+        # Capture token usage from Claude API response
+        input_tokens = message.usage.input_tokens
+        output_tokens = message.usage.output_tokens
+
+        logger.info(f"Claude API usage - Input tokens: {input_tokens}, Output tokens: {output_tokens}")
+
+        # Parse JSON response - handle potential markdown code blocks or extra text
         try:
-            soap_content = json.loads(response_text)
+            soap_content = _extract_json_from_response(response_text)
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse Claude response as JSON (length={len(response_text)})")
+            logger.debug(f"Response content: {response_text[:500]}...")
             raise NoteGenerationError(f"Failed to parse generated note: {str(e)}")
 
-        # Add metadata
+        # Add metadata including token usage
         soap_content["metadata"] = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "model_version": "claude-sonnet-4-20250514",
             "confidence_score": None,  # Could be enhanced with confidence estimation
+            "usage": {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            },
         }
 
         logger.info("SOAP note generated successfully")
@@ -340,3 +414,88 @@ def format_note_as_text(content: dict) -> str:
     text = text.replace("- ", "  • ")
 
     return text
+
+
+# Cost calculation constants (as of 2024)
+# Claude Sonnet pricing
+CLAUDE_SONNET_INPUT_COST_PER_MILLION = 3.00  # $3 per 1M input tokens
+CLAUDE_SONNET_OUTPUT_COST_PER_MILLION = 15.00  # $15 per 1M output tokens
+
+# Deepgram pricing (nova-2-medical, pay-as-you-go)
+DEEPGRAM_COST_PER_MINUTE = 0.0043  # $0.0043 per minute
+
+
+def calculate_claude_cost(input_tokens: int, output_tokens: int) -> dict:
+    """
+    Calculate the cost of a Claude API call.
+
+    Args:
+        input_tokens: Number of input tokens used.
+        output_tokens: Number of output tokens generated.
+
+    Returns:
+        dict with input_cost, output_cost, and total_cost in USD.
+    """
+    input_cost = (input_tokens / 1_000_000) * CLAUDE_SONNET_INPUT_COST_PER_MILLION
+    output_cost = (output_tokens / 1_000_000) * CLAUDE_SONNET_OUTPUT_COST_PER_MILLION
+    total_cost = input_cost + output_cost
+
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "input_cost_usd": round(input_cost, 6),
+        "output_cost_usd": round(output_cost, 6),
+        "total_cost_usd": round(total_cost, 6),
+    }
+
+
+def calculate_deepgram_cost(duration_minutes: float) -> dict:
+    """
+    Calculate the estimated cost of Deepgram transcription.
+
+    Args:
+        duration_minutes: Audio duration in minutes.
+
+    Returns:
+        dict with duration and cost in USD.
+    """
+    cost = duration_minutes * DEEPGRAM_COST_PER_MINUTE
+
+    return {
+        "duration_minutes": duration_minutes,
+        "cost_usd": round(cost, 4),
+    }
+
+
+def estimate_total_visit_cost(
+    input_tokens: int,
+    output_tokens: int,
+    audio_duration_minutes: float | None = None,
+) -> dict:
+    """
+    Estimate the total cost of processing a visit.
+
+    Args:
+        input_tokens: Claude input tokens.
+        output_tokens: Claude output tokens.
+        audio_duration_minutes: Optional audio duration for Deepgram cost.
+
+    Returns:
+        dict with detailed cost breakdown.
+    """
+    claude_costs = calculate_claude_cost(input_tokens, output_tokens)
+
+    result = {
+        "claude": claude_costs,
+        "deepgram": None,
+        "total_cost_usd": claude_costs["total_cost_usd"],
+    }
+
+    if audio_duration_minutes is not None:
+        deepgram_costs = calculate_deepgram_cost(audio_duration_minutes)
+        result["deepgram"] = deepgram_costs
+        result["total_cost_usd"] = round(
+            claude_costs["total_cost_usd"] + deepgram_costs["cost_usd"], 4
+        )
+
+    return result
