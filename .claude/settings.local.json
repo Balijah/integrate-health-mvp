@@ -24,7 +24,9 @@
       "WebFetch(domain:platform.openai.com)",
       "WebFetch(domain:aws.amazon.com)",
       "WebFetch(domain:deepgram.com)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:privacy.claude.com)",
+      "WebFetch(domain:developers.deepgram.com)"
     ]
   }
 }
