@@ -26,7 +26,8 @@
       "WebFetch(domain:deepgram.com)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:privacy.claude.com)",
-      "WebFetch(domain:developers.deepgram.com)"
+      "WebFetch(domain:developers.deepgram.com)",
+      "Bash(git checkout:*)"
     ]
   }
 }
