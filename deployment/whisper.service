@@ -1,0 +1,48 @@
+# Systemd service file for Whisper Transcription Service
+# Location: /etc/systemd/system/whisper.service
+
+[Unit]
+Description=Whisper Transcription Service
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/home/ec2-user/whisper-service
+
+# Environment variables
+Environment="PORT=8080"
+Environment="WHISPER_MODEL=large-v3"
+Environment="PATH=/home/ec2-user/whisper-service/venv/bin:/usr/local/bin:/usr/bin:/bin"
+
+# Application startup
+ExecStart=/home/ec2-user/whisper-service/venv/bin/uvicorn app:app \
+    --host 0.0.0.0 \
+    --port 8080 \
+    --workers 1 \
+    --access-log \
+    --log-level info
+
+# Restart configuration
+Restart=always
+RestartSec=30
+StartLimitInterval=300
+StartLimitBurst=3
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Resource limits (GPU workloads need memory)
+MemoryMax=16G
+TasksMax=100
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=whisper
+
+[Install]
+WantedBy=multi-user.target

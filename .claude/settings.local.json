@@ -27,7 +27,9 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:privacy.claude.com)",
       "WebFetch(domain:developers.deepgram.com)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(find:*)",
+      "Bash(aws ec2 describe-images:*)"
     ]
   }
 }

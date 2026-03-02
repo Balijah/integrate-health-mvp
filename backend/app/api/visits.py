@@ -2,8 +2,10 @@
 Visit management API endpoints.
 
 Handles CRUD operations for patient visits and audio upload.
+Supports both local storage and S3 storage modes.
 """
 
+import logging
 import uuid
 from pathlib import Path
 
@@ -25,6 +27,8 @@ from app.utils.audio import (
     get_audio_duration_estimate,
     validate_audio_file,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -266,6 +270,8 @@ async def upload_audio(
     """
     Upload audio file for a visit.
 
+    Supports both local storage and S3 storage based on configuration.
+
     Args:
         visit_id: Visit UUID
         file: Uploaded audio file
@@ -316,19 +322,38 @@ async def upload_audio(
             detail=error_message,
         )
 
-    # Generate filename and save file
-    filename = generate_audio_filename(str(visit_id), mime_type)
-    upload_path = Path(settings.upload_dir)
-    upload_path.mkdir(parents=True, exist_ok=True)
-
-    file_path = upload_path / filename
-    file_path.write_bytes(content)
-
     # Estimate duration
     duration_estimate = get_audio_duration_estimate(content, mime_type)
 
+    # Store file based on storage mode
+    if settings.storage_mode == "s3" and settings.s3_bucket_name:
+        # S3 Storage mode
+        try:
+            from app.services.s3_storage import upload_audio as s3_upload
+
+            s3_key = s3_upload(content, str(visit_id), mime_type)
+            file_path = s3_key  # Store S3 key in database
+            logger.info(f"Audio uploaded to S3: {s3_key}")
+
+        except Exception as e:
+            logger.error(f"S3 upload failed: {type(e).__name__}: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to upload audio file. Please try again.",
+            )
+    else:
+        # Local storage mode (default)
+        filename = generate_audio_filename(str(visit_id), mime_type)
+        upload_path = Path(settings.upload_dir)
+        upload_path.mkdir(parents=True, exist_ok=True)
+
+        local_file_path = upload_path / filename
+        local_file_path.write_bytes(content)
+        file_path = str(local_file_path)
+        logger.info(f"Audio saved locally: {file_path}")
+
     # Update visit record
-    visit.audio_file_path = str(file_path)
+    visit.audio_file_path = file_path
     visit.audio_duration_seconds = duration_estimate
     visit.transcription_status = "pending"
 

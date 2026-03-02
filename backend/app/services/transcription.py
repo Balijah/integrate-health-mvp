@@ -1,13 +1,15 @@
 """
-Transcription service using Deepgram API.
+Transcription service using self-hosted Whisper.
 
-Provides audio transcription functionality with medical model support.
+Provides audio transcription functionality via a self-hosted Whisper service
+running on AWS GPU instances.
 """
 
 import logging
 from pathlib import Path
+from typing import Optional
 
-from deepgram import DeepgramClient, PrerecordedOptions, FileSource
+import httpx
 
 from app.config import get_settings
 
@@ -16,13 +18,12 @@ logger = logging.getLogger(__name__)
 
 class TranscriptionError(Exception):
     """Custom exception for transcription failures."""
-
     pass
 
 
 def transcribe_audio(audio_bytes: bytes, mime_type: str) -> dict:
     """
-    Transcribe audio using Deepgram's medical model.
+    Transcribe audio using the self-hosted Whisper service.
 
     This is a synchronous function for use in background tasks.
 
@@ -31,99 +32,111 @@ def transcribe_audio(audio_bytes: bytes, mime_type: str) -> dict:
         mime_type: Audio MIME type (e.g., audio/webm, audio/wav).
 
     Returns:
-        dict with 'transcript', 'words', 'metadata', and 'speakers'.
+        dict with 'transcript', 'raw_transcript', 'words', 'metadata', and 'speakers'.
 
     Raises:
         TranscriptionError: If transcription fails.
     """
     settings = get_settings()
 
-    if not settings.deepgram_api_key:
+    if not settings.whisper_service_url:
         raise TranscriptionError(
-            "Deepgram API key not configured. Set DEEPGRAM_API_KEY in environment."
+            "Whisper service URL not configured. Set WHISPER_SERVICE_URL in environment."
         )
 
     try:
-        # Initialize Deepgram client
-        deepgram = DeepgramClient(settings.deepgram_api_key)
+        logger.info(f"Starting Whisper transcription ({len(audio_bytes)} bytes)...")
 
-        # Configure transcription options
-        # Using nova-2-medical for medical terminology optimization
-        options = PrerecordedOptions(
-            model="nova-2-medical",
-            language="en-US",
-            smart_format=True,  # Automatic punctuation and formatting
-            diarize=True,  # Speaker separation
-            punctuate=True,
-            utterances=True,  # Sentence boundaries
-            paragraphs=True,
-        )
-
-        # Prepare audio source
-        payload: FileSource = {
-            "buffer": audio_bytes,
-            "mimetype": mime_type,
+        # Prepare multipart form data
+        files = {
+            "audio": ("audio", audio_bytes, mime_type),
+        }
+        data = {
+            "mime_type": mime_type,
         }
 
-        # Call Deepgram API (using prerecorded endpoint)
-        logger.info("Starting Deepgram transcription...")
-        response = deepgram.listen.prerecorded.v("1").transcribe_file(payload, options)
+        # Call Whisper service with timeout
+        with httpx.Client(timeout=settings.whisper_timeout_seconds) as client:
+            response = client.post(
+                f"{settings.whisper_service_url}/transcribe",
+                files=files,
+                data=data,
+            )
 
-        # Extract results
-        result = response.to_dict()
+        if response.status_code != 200:
+            logger.error(f"Whisper service returned status {response.status_code}")
+            raise TranscriptionError(
+                f"Transcription service error (status {response.status_code})"
+            )
 
-        # Get the transcript text
-        transcript = ""
-        words = []
-        speakers = set()
+        result = response.json()
 
-        if result.get("results", {}).get("channels"):
-            channel = result["results"]["channels"][0]
-            if channel.get("alternatives"):
-                alternative = channel["alternatives"][0]
-                transcript = alternative.get("transcript", "")
-                words = alternative.get("words", [])
+        # Extract transcript text
+        transcript = result.get("text", "").strip()
 
-                # Extract unique speakers
-                for word in words:
-                    if "speaker" in word:
-                        speakers.add(word["speaker"])
+        if not transcript:
+            logger.warning("Whisper returned empty transcript")
 
-        # Build formatted transcript with speaker labels if diarization worked
+        # Get duration from result
+        duration_seconds = result.get("duration", 0)
+
+        # Format transcript with segments if available
+        # Whisper provides segments but not speaker diarization by default
         formatted_transcript = transcript
-        if len(speakers) > 1 and result.get("results", {}).get("utterances"):
-            utterances = result["results"]["utterances"]
-            formatted_lines = []
-            for utterance in utterances:
-                speaker = utterance.get("speaker", 0)
-                text = utterance.get("transcript", "")
-                formatted_lines.append(f"Speaker {speaker}: {text}")
-            formatted_transcript = "\n\n".join(formatted_lines)
+        segments = result.get("segments", [])
 
-        # Extract metadata
-        metadata = {
-            "duration_seconds": result.get("metadata", {}).get("duration", 0),
-            "channels": result.get("metadata", {}).get("channels", 1),
-            "model": result.get("metadata", {}).get("model_info", {}).get("name", "nova-2-medical"),
-            "request_id": result.get("metadata", {}).get("request_id", ""),
-        }
+        if segments:
+            # Create a cleaner formatted version with segment breaks
+            formatted_lines = []
+            for segment in segments:
+                text = segment.get("text", "").strip()
+                if text:
+                    formatted_lines.append(text)
+            if formatted_lines:
+                formatted_transcript = " ".join(formatted_lines)
 
         logger.info(
-            f"Transcription completed. Duration: {metadata['duration_seconds']}s, "
-            f"Speakers: {len(speakers)}"
+            f"Transcription completed. Duration: {duration_seconds}s, "
+            f"Length: {len(transcript)} chars"
         )
 
         return {
             "transcript": formatted_transcript,
             "raw_transcript": transcript,
-            "words": words,
-            "speakers": list(speakers),
-            "metadata": metadata,
+            "words": [],  # Whisper basic mode doesn't provide word-level timing
+            "speakers": [],  # No diarization in basic Whisper
+            "metadata": {
+                "duration_seconds": duration_seconds,
+                "channels": 1,
+                "model": "whisper-large-v3",
+                "language": result.get("language", "en"),
+                "request_id": "",  # Whisper doesn't provide request IDs
+            },
         }
 
+    except httpx.TimeoutException:
+        logger.error("Whisper service request timed out")
+        raise TranscriptionError(
+            "Transcription timed out. Audio may be too long."
+        )
+
+    except httpx.ConnectError:
+        logger.error("Failed to connect to Whisper service")
+        raise TranscriptionError(
+            "Failed to connect to transcription service. Please try again."
+        )
+
+    except httpx.HTTPError as e:
+        logger.error(f"HTTP error during transcription: {type(e).__name__}")
+        raise TranscriptionError(
+            "Transcription service communication error. Please try again."
+        )
+
     except Exception as e:
-        logger.error(f"Transcription failed: {type(e).__name__}")
-        raise TranscriptionError("Transcription failed. Please try again.") from e
+        logger.error(f"Transcription failed: {type(e).__name__}: {str(e)}")
+        raise TranscriptionError(
+            "Transcription failed. Please try again."
+        ) from e
 
 
 def transcribe_audio_file(file_path: str) -> dict:
@@ -155,8 +168,86 @@ def transcribe_audio_file(file_path: str) -> dict:
         ".ogg": "audio/ogg",
     }
 
-    mime_type = mime_types.get(path.suffix.lower(), "audio/webm")
+    mime_type = mime_types.get(path.suffix.lower(), "audio/wav")
 
     # Read file and transcribe
     audio_bytes = path.read_bytes()
     return transcribe_audio(audio_bytes, mime_type)
+
+
+def check_whisper_service_health() -> dict:
+    """
+    Check if the Whisper service is healthy and available.
+
+    Returns:
+        dict with health status information.
+
+    Raises:
+        TranscriptionError: If service is unavailable.
+    """
+    settings = get_settings()
+
+    try:
+        with httpx.Client(timeout=10) as client:
+            response = client.get(f"{settings.whisper_service_url}/health")
+
+        if response.status_code != 200:
+            return {
+                "status": "unhealthy",
+                "error": f"Service returned status {response.status_code}",
+            }
+
+        return response.json()
+
+    except httpx.ConnectError:
+        return {
+            "status": "unavailable",
+            "error": "Cannot connect to Whisper service",
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+        }
+
+
+def transcribe_from_s3(s3_key: str) -> dict:
+    """
+    Transcribe audio file stored in S3.
+
+    Downloads the audio from S3 and sends it to the Whisper service.
+
+    Args:
+        s3_key: S3 object key for the audio file.
+
+    Returns:
+        dict with transcription results.
+
+    Raises:
+        TranscriptionError: If download or transcription fails.
+    """
+    from app.services.s3_storage import download_audio, S3StorageError
+
+    try:
+        # Download audio from S3
+        logger.info(f"Downloading audio from S3: {s3_key}")
+        audio_bytes = download_audio(s3_key)
+
+        # Determine MIME type from key extension
+        mime_types = {
+            ".wav": "audio/wav",
+            ".mp3": "audio/mpeg",
+            ".m4a": "audio/mp4",
+            ".webm": "audio/webm",
+            ".ogg": "audio/ogg",
+        }
+
+        extension = Path(s3_key).suffix.lower()
+        mime_type = mime_types.get(extension, "audio/wav")
+
+        # Transcribe
+        return transcribe_audio(audio_bytes, mime_type)
+
+    except S3StorageError as e:
+        raise TranscriptionError(f"Failed to download audio: {str(e)}") from e

@@ -1,0 +1,42 @@
+# Systemd service file for Integrate Health FastAPI backend
+# Location: /etc/systemd/system/integrate-health.service
+
+[Unit]
+Description=Integrate Health FastAPI Backend
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/home/ec2-user/app/backend
+
+# Environment file with secrets
+EnvironmentFile=/home/ec2-user/app/backend/.env
+
+# Application startup
+ExecStart=/home/ec2-user/app/backend/venv/bin/uvicorn app.main:app \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --workers 2 \
+    --access-log \
+    --log-level info
+
+# Restart configuration
+Restart=always
+RestartSec=10
+StartLimitInterval=60
+StartLimitBurst=3
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=integrate-health
+
+[Install]
+WantedBy=multi-user.target

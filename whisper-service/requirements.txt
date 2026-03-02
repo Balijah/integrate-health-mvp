@@ -1,0 +1,14 @@
+# Whisper Transcription Service Dependencies
+
+# Web Framework
+fastapi==0.109.2
+uvicorn[standard]==0.27.1
+python-multipart==0.0.9
+
+# Whisper and ML
+openai-whisper==20231117
+torch>=2.0.0
+numpy>=1.24.0
+
+# Audio processing
+ffmpeg-python==0.2.0

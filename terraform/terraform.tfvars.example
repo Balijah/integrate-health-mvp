@@ -1,0 +1,39 @@
+# Terraform variables for Integrate Health MVP
+# Copy this file to terraform.tfvars and fill in your values
+# IMPORTANT: Do not commit terraform.tfvars to version control
+
+# AWS region
+aws_region = "us-east-1"
+
+# Environment (production, staging, development)
+environment = "production"
+
+# Database credentials - REQUIRED
+# Use strong passwords with at least 16 characters
+db_username = "postgres"
+db_password = "IntegrateHealth.ai2026!"
+
+# Your public IP for SSH access (find yours at whatismyip.com)
+# Format: "YOUR_IP/32" for single IP or "YOUR_CIDR" for range
+allowed_ssh_cidr = "76.195.134.23/32"  # CHANGE THIS
+
+# Application secrets - REQUIRED
+# Generate with: openssl rand -hex 32
+app_secret_key = "01e64196133916807e28c4f03615729c0a594eeed85a5adca638f91c4acc4e52"
+jwt_secret_key = "cb235d685573e41ddb6ec975057dc0c264cf566e62f9565ab856dce2a3db58fb"
+
+# Instance types (adjust for cost/performance)
+app_instance_type     = "t3.small"       # ~$15/month
+whisper_instance_type = "g4dn.xlarge"    # ~$115/month Spot
+
+# Database settings
+db_instance_class    = "db.t3.micro"     # Free tier eligible
+db_allocated_storage = 20                 # GB
+
+# Cost optimization options
+enable_nat_gateway   = true               # ~$32/month, required for private subnet internet
+use_spot_for_whisper = true               # Use Spot instances for Whisper (70% savings)
+
+# Bedrock model for note generation
+# Options: anthropic.claude-3-sonnet-20240229-v1:0, anthropic.claude-3-haiku-20240307-v1:0
+bedrock_model_id = "anthropic.claude-3-sonnet-20240229-v1:0"

@@ -1,7 +1,8 @@
 """
-SOAP Note generation service using Anthropic Claude.
+SOAP Note generation service using AWS Bedrock.
 
-Generates structured SOAP notes from visit transcripts.
+Generates structured SOAP notes from visit transcripts using Claude models
+via AWS Bedrock.
 """
 
 import json
@@ -9,7 +10,8 @@ import logging
 import re
 from datetime import datetime, timezone
 
-import anthropic
+import boto3
+from botocore.exceptions import ClientError, BotoCoreError
 
 from app.config import get_settings
 
@@ -18,7 +20,6 @@ logger = logging.getLogger(__name__)
 
 class NoteGenerationError(Exception):
     """Custom exception for note generation failures."""
-
     pass
 
 
@@ -89,6 +90,12 @@ Generate the SOAP note in this exact JSON structure:
 Respond with ONLY the JSON object, no additional text."""
 
 
+def _get_bedrock_client():
+    """Get boto3 Bedrock Runtime client."""
+    settings = get_settings()
+    return boto3.client("bedrock-runtime", region_name=settings.aws_region)
+
+
 def _extract_json_from_response(response_text: str) -> dict:
     """
     Extract JSON from Claude's response, handling various formats.
@@ -153,7 +160,7 @@ def _extract_json_from_response(response_text: str) -> dict:
 
 def generate_soap_note(transcript: str, additional_context: str | None = None) -> dict:
     """
-    Generate a SOAP note from a transcript using Claude.
+    Generate a SOAP note from a transcript using AWS Bedrock.
 
     Args:
         transcript: The visit transcript text.
@@ -167,17 +174,12 @@ def generate_soap_note(transcript: str, additional_context: str | None = None) -
     """
     settings = get_settings()
 
-    if not settings.anthropic_api_key:
-        raise NoteGenerationError(
-            "Anthropic API key not configured. Set ANTHROPIC_API_KEY in environment."
-        )
-
     if not transcript or not transcript.strip():
         raise NoteGenerationError("Transcript is empty. Cannot generate note.")
 
     try:
-        # Initialize Anthropic client
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        # Initialize Bedrock client
+        bedrock = _get_bedrock_client()
 
         # Build user prompt
         context_section = ""
@@ -189,39 +191,52 @@ def generate_soap_note(transcript: str, additional_context: str | None = None) -
             transcript=transcript,
         )
 
-        # Call Claude API
-        logger.info("Generating SOAP note with Claude...")
-        message = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=4096,
-            temperature=0.3,  # Lower temperature for consistency
-            system=SYSTEM_PROMPT,
-            messages=[
+        # Prepare request body for Bedrock
+        request_body = {
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": settings.bedrock_max_tokens,
+            "temperature": settings.bedrock_temperature,
+            "system": SYSTEM_PROMPT,
+            "messages": [
                 {"role": "user", "content": user_prompt}
             ],
+        }
+
+        # Call Bedrock API
+        logger.info(f"Generating SOAP note with Bedrock ({settings.bedrock_model_id})...")
+
+        response = bedrock.invoke_model(
+            modelId=settings.bedrock_model_id,
+            body=json.dumps(request_body),
+            contentType="application/json",
+            accept="application/json",
         )
 
+        # Parse response
+        response_body = json.loads(response["body"].read())
+
         # Extract response text
-        response_text = message.content[0].text
+        response_text = response_body["content"][0]["text"]
 
-        # Capture token usage from Claude API response
-        input_tokens = message.usage.input_tokens
-        output_tokens = message.usage.output_tokens
+        # Capture token usage from Bedrock response
+        usage = response_body.get("usage", {})
+        input_tokens = usage.get("input_tokens", 0)
+        output_tokens = usage.get("output_tokens", 0)
 
-        logger.info(f"Claude API usage - Input tokens: {input_tokens}, Output tokens: {output_tokens}")
+        logger.info(f"Bedrock API usage - Input tokens: {input_tokens}, Output tokens: {output_tokens}")
 
         # Parse JSON response - handle potential markdown code blocks or extra text
         try:
             soap_content = _extract_json_from_response(response_text)
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse Claude response as JSON (length={len(response_text)})")
+            logger.error(f"Failed to parse Bedrock response as JSON (length={len(response_text)})")
             logger.debug(f"Response content: {response_text[:500]}...")
             raise NoteGenerationError(f"Failed to parse generated note: {str(e)}")
 
         # Add metadata including token usage
         soap_content["metadata"] = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "model_version": "claude-sonnet-4-20250514",
+            "model_version": settings.bedrock_model_id,
             "confidence_score": None,  # Could be enhanced with confidence estimation
             "usage": {
                 "input_tokens": input_tokens,
@@ -232,20 +247,29 @@ def generate_soap_note(transcript: str, additional_context: str | None = None) -
         logger.info("SOAP note generated successfully")
         return soap_content
 
-    except anthropic.APIConnectionError as e:
-        logger.error(f"Failed to connect to Anthropic API: {str(e)}")
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "Unknown")
+        error_message = e.response.get("Error", {}).get("Message", "Unknown error")
+
+        if error_code == "ThrottlingException":
+            logger.error(f"Bedrock API rate limit exceeded: {error_message}")
+            raise NoteGenerationError("AI service rate limit exceeded. Please try again later.")
+        elif error_code == "AccessDeniedException":
+            logger.error(f"Bedrock access denied: {error_message}")
+            raise NoteGenerationError("AI service access denied. Check IAM permissions.")
+        elif error_code == "ModelNotReadyException":
+            logger.error(f"Bedrock model not ready: {error_message}")
+            raise NoteGenerationError("AI model not available. Please try again.")
+        else:
+            logger.error(f"Bedrock API error ({error_code}): {error_message}")
+            raise NoteGenerationError("AI service error. Please try again.")
+
+    except BotoCoreError as e:
+        logger.error(f"Failed to connect to Bedrock: {str(e)}")
         raise NoteGenerationError("Failed to connect to AI service. Please try again.")
 
-    except anthropic.RateLimitError as e:
-        logger.error(f"Anthropic API rate limit exceeded: {str(e)}")
-        raise NoteGenerationError("AI service rate limit exceeded. Please try again later.")
-
-    except anthropic.APIStatusError as e:
-        logger.error(f"Anthropic API error (status={e.status_code})")
-        raise NoteGenerationError("AI service error. Please try again.")
-
     except Exception as e:
-        logger.error(f"Unexpected error generating note: {type(e).__name__}")
+        logger.error(f"Unexpected error generating note: {type(e).__name__}: {str(e)}")
         raise NoteGenerationError("Failed to generate note. Please try again.")
 
 
@@ -411,23 +435,24 @@ def format_note_as_text(content: dict) -> str:
 
     # Simple conversion: remove markdown formatting
     text = markdown.replace("# ", "").replace("## ", "\n").replace("**", "")
-    text = text.replace("- ", "  • ")
+    text = text.replace("- ", "  - ")
 
     return text
 
 
-# Cost calculation constants (as of 2024)
-# Claude Sonnet pricing
-CLAUDE_SONNET_INPUT_COST_PER_MILLION = 3.00  # $3 per 1M input tokens
-CLAUDE_SONNET_OUTPUT_COST_PER_MILLION = 15.00  # $15 per 1M output tokens
+# Cost calculation constants (AWS Bedrock pricing as of 2024)
+# Claude 3 Sonnet on Bedrock pricing
+BEDROCK_SONNET_INPUT_COST_PER_MILLION = 3.00  # $3 per 1M input tokens
+BEDROCK_SONNET_OUTPUT_COST_PER_MILLION = 15.00  # $15 per 1M output tokens
 
-# Deepgram pricing (nova-2-medical, pay-as-you-go)
-DEEPGRAM_COST_PER_MINUTE = 0.0043  # $0.0043 per minute
+# Whisper self-hosted (approximate based on GPU costs)
+# g4dn.xlarge Spot: ~$0.19/hour, can process ~60 min audio/hour
+WHISPER_COST_PER_MINUTE = 0.0032  # ~$0.19/60 minutes
 
 
-def calculate_claude_cost(input_tokens: int, output_tokens: int) -> dict:
+def calculate_bedrock_cost(input_tokens: int, output_tokens: int) -> dict:
     """
-    Calculate the cost of a Claude API call.
+    Calculate the cost of a Bedrock API call.
 
     Args:
         input_tokens: Number of input tokens used.
@@ -436,8 +461,8 @@ def calculate_claude_cost(input_tokens: int, output_tokens: int) -> dict:
     Returns:
         dict with input_cost, output_cost, and total_cost in USD.
     """
-    input_cost = (input_tokens / 1_000_000) * CLAUDE_SONNET_INPUT_COST_PER_MILLION
-    output_cost = (output_tokens / 1_000_000) * CLAUDE_SONNET_OUTPUT_COST_PER_MILLION
+    input_cost = (input_tokens / 1_000_000) * BEDROCK_SONNET_INPUT_COST_PER_MILLION
+    output_cost = (output_tokens / 1_000_000) * BEDROCK_SONNET_OUTPUT_COST_PER_MILLION
     total_cost = input_cost + output_cost
 
     return {
@@ -449,9 +474,9 @@ def calculate_claude_cost(input_tokens: int, output_tokens: int) -> dict:
     }
 
 
-def calculate_deepgram_cost(duration_minutes: float) -> dict:
+def calculate_whisper_cost(duration_minutes: float) -> dict:
     """
-    Calculate the estimated cost of Deepgram transcription.
+    Calculate the estimated cost of Whisper transcription.
 
     Args:
         duration_minutes: Audio duration in minutes.
@@ -459,7 +484,7 @@ def calculate_deepgram_cost(duration_minutes: float) -> dict:
     Returns:
         dict with duration and cost in USD.
     """
-    cost = duration_minutes * DEEPGRAM_COST_PER_MINUTE
+    cost = duration_minutes * WHISPER_COST_PER_MINUTE
 
     return {
         "duration_minutes": duration_minutes,
@@ -476,26 +501,26 @@ def estimate_total_visit_cost(
     Estimate the total cost of processing a visit.
 
     Args:
-        input_tokens: Claude input tokens.
-        output_tokens: Claude output tokens.
-        audio_duration_minutes: Optional audio duration for Deepgram cost.
+        input_tokens: Bedrock input tokens.
+        output_tokens: Bedrock output tokens.
+        audio_duration_minutes: Optional audio duration for Whisper cost.
 
     Returns:
         dict with detailed cost breakdown.
     """
-    claude_costs = calculate_claude_cost(input_tokens, output_tokens)
+    bedrock_costs = calculate_bedrock_cost(input_tokens, output_tokens)
 
     result = {
-        "claude": claude_costs,
-        "deepgram": None,
-        "total_cost_usd": claude_costs["total_cost_usd"],
+        "bedrock": bedrock_costs,
+        "whisper": None,
+        "total_cost_usd": bedrock_costs["total_cost_usd"],
     }
 
     if audio_duration_minutes is not None:
-        deepgram_costs = calculate_deepgram_cost(audio_duration_minutes)
-        result["deepgram"] = deepgram_costs
+        whisper_costs = calculate_whisper_cost(audio_duration_minutes)
+        result["whisper"] = whisper_costs
         result["total_cost_usd"] = round(
-            claude_costs["total_cost_usd"] + deepgram_costs["cost_usd"], 4
+            bedrock_costs["total_cost_usd"] + whisper_costs["cost_usd"], 4
         )
 
     return result
