@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     whisper_service_url: str = "http://localhost:8080"
     whisper_timeout_seconds: int = 300  # 5 minutes for long audio
 
+    # AWS Transcribe (fallback when Whisper unavailable)
+    transcription_provider: str = "whisper"  # "whisper" or "aws_transcribe"
+    aws_transcribe_language_code: str = "en-US"
+    aws_transcribe_medical_specialty: str = "PRIMARYCARE"  # PRIMARYCARE, CARDIOLOGY, etc.
+
     # AWS Bedrock (LLM for note generation)
     bedrock_model_id: str = "anthropic.claude-3-sonnet-20240229-v1:0"
     bedrock_max_tokens: int = 4096

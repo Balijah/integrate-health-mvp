@@ -30,14 +30,20 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# Configure CORS
+# Configure CORS - include production domains
+cors_origins = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3000",
+    "http://frontend:3000",
+    # Production origins
+    "https://d3nem3tkboqfr7.cloudfront.net",
+    "http://integrate-health-alb-32268964.us-east-1.elb.amazonaws.com",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://frontend:3000",
-    ],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

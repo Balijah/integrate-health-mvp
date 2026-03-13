@@ -208,7 +208,7 @@ export const VisitDetail = () => {
   }
 
   // Handle live transcription complete
-  const handleLiveTranscriptionComplete = async (transcript: string) => {
+  const handleLiveTranscriptionComplete = async (_transcript: string) => {
     // Note: Do not log transcript content (PHI)
     toast.success('Live transcription completed')
     // Refresh visit data to show transcript
