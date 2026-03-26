@@ -37,6 +37,7 @@ cors_origins = [
     "http://127.0.0.1:3000",
     "http://frontend:3000",
     # Production origins
+    "https://app.integratehealth.ai",
     "https://d3nem3tkboqfr7.cloudfront.net",
     "http://integrate-health-alb-32268964.us-east-1.elb.amazonaws.com",
 ]

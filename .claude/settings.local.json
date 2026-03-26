@@ -75,7 +75,10 @@
       "Bash(aws cloudfront get-cache-policy:*)",
       "Bash(ping:*)",
       "Bash(networksetup:*)",
-      "Bash(__NEW_LINE_6dc214c9b0f33b84__ echo:*)"
+      "Bash(__NEW_LINE_6dc214c9b0f33b84__ echo:*)",
+      "Bash(aws acm:*)",
+      "Bash(aws elbv2:*)",
+      "Bash(dig CNAME:*)"
     ]
   }
 }
