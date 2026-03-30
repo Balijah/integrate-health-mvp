@@ -1,9 +1,3 @@
-/**
- * Reusable Card component.
- *
- * Provides a consistent container with optional header and padding.
- */
-
 import { ReactNode } from 'react'
 
 interface CardProps {
@@ -15,6 +9,7 @@ interface CardProps {
   padding?: 'none' | 'sm' | 'md' | 'lg'
   onClick?: () => void
   hoverable?: boolean
+  featured?: boolean
 }
 
 const paddingStyles = {
@@ -33,14 +28,16 @@ export const Card = ({
   padding = 'md',
   onClick,
   hoverable = false,
+  featured = false,
 }: CardProps) => {
   const hasHeader = title || subtitle || actions
 
   return (
     <div
       className={`
-        rounded-lg bg-white shadow
-        ${hoverable ? 'cursor-pointer transition-shadow hover:shadow-md' : ''}
+        bg-white rounded-2xl shadow-md
+        ${featured ? 'border-2 border-[#4ac6d6]' : 'border border-[#4ac6d6]'}
+        ${hoverable ? 'cursor-pointer transition-shadow hover:shadow-lg' : ''}
         ${onClick ? 'cursor-pointer' : ''}
         ${className}
       `}
@@ -59,13 +56,13 @@ export const Card = ({
       }
     >
       {hasHeader && (
-        <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
           <div>
             {title && (
-              <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
+              <h3 className="text-lg font-heading italic font-medium text-gray-900">{title}</h3>
             )}
             {subtitle && (
-              <p className="mt-1 text-sm text-gray-500">{subtitle}</p>
+              <p className="mt-1 text-sm italic text-gray-500">{subtitle}</p>
             )}
           </div>
           {actions && <div className="flex items-center gap-2">{actions}</div>}

@@ -30,23 +30,28 @@ class Settings(BaseSettings):
     s3_bucket_name: str = ""  # Required for AWS deployment
     s3_audio_prefix: str = "audio/"  # Prefix for audio files in S3
 
-    # Whisper Service (self-hosted transcription)
-    whisper_service_url: str = "http://localhost:8080"
-    whisper_timeout_seconds: int = 300  # 5 minutes for long audio
+    # Deepgram (primary transcription)
+    deepgram_api_key: str = ""
+    deepgram_model: str = "nova-2-medical"
+    deepgram_language: str = "en-US"
 
-    # AWS Transcribe (fallback when Whisper unavailable)
-    transcription_provider: str = "whisper"  # "whisper" or "aws_transcribe"
+    # Provider selection
+    transcription_provider: str = "deepgram"
+
+    # Whisper Service (deprecated — kept to avoid crash if old .env still present)
+    whisper_service_url: str = "http://localhost:8080"
+    whisper_timeout_seconds: int = 300
+
+    # AWS Transcribe (deprecated)
     aws_transcribe_language_code: str = "en-US"
-    aws_transcribe_medical_specialty: str = "PRIMARYCARE"  # PRIMARYCARE, CARDIOLOGY, etc.
+    aws_transcribe_medical_specialty: str = "PRIMARYCARE"
 
     # AWS Bedrock (LLM for note generation)
     bedrock_model_id: str = "anthropic.claude-3-sonnet-20240229-v1:0"
     bedrock_max_tokens: int = 4096
     bedrock_temperature: float = 0.3
 
-    # Legacy External Services (kept for backward compatibility during migration)
-    # These will be removed after full AWS migration
-    deepgram_api_key: str = ""
+    # Legacy
     anthropic_api_key: str = ""
 
     # Storage Mode: "local" for local filesystem, "s3" for AWS S3

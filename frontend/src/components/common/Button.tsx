@@ -1,12 +1,6 @@
-/**
- * Reusable Button component.
- *
- * Provides consistent button styling with variants.
- */
-
 import { ButtonHTMLAttributes, ReactNode } from 'react'
 
-type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost'
+type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost' | 'outline'
 type ButtonSize = 'sm' | 'md' | 'lg'
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -19,19 +13,21 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variantStyles: Record<ButtonVariant, string> = {
   primary:
-    'bg-primary-600 text-white hover:bg-primary-500 focus:ring-primary-500',
+    'bg-[#4ac6d6] text-gray-900 hover:bg-[#3ab5c5]',
   secondary:
-    'bg-gray-100 text-gray-700 hover:bg-gray-200 focus:ring-gray-500',
+    'bg-[#4ac6d6]/20 text-gray-900 hover:bg-[#4ac6d6]/30',
   danger:
-    'bg-red-600 text-white hover:bg-red-500 focus:ring-red-500',
+    'text-red-500 hover:text-red-700',
   ghost:
-    'bg-transparent text-gray-700 hover:bg-gray-100 focus:ring-gray-500',
+    'text-gray-700 hover:bg-gray-100',
+  outline:
+    'border-2 border-[#4ac6d6] text-gray-900 hover:bg-gray-50',
 }
 
 const sizeStyles: Record<ButtonSize, string> = {
   sm: 'px-3 py-1.5 text-sm',
-  md: 'px-4 py-2 text-sm',
-  lg: 'px-6 py-3 text-base',
+  md: 'px-6 py-3 text-sm',
+  lg: 'px-8 py-4 text-base',
 }
 
 export const Button = ({
@@ -45,7 +41,7 @@ export const Button = ({
   ...props
 }: ButtonProps) => {
   const baseStyles =
-    'inline-flex items-center justify-center rounded-md font-semibold shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors'
+    'inline-flex items-center justify-center rounded-xl font-medium focus:outline-none focus:ring-2 focus:ring-[#4ac6d6]/30 transition-colors'
 
   const disabledStyles = 'disabled:cursor-not-allowed disabled:opacity-50'
 

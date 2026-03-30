@@ -78,7 +78,29 @@
       "Bash(__NEW_LINE_6dc214c9b0f33b84__ echo:*)",
       "Bash(aws acm:*)",
       "Bash(aws elbv2:*)",
-      "Bash(dig CNAME:*)"
+      "Bash(dig CNAME:*)",
+      "Bash(aws:*)",
+      "Bash(__NEW_LINE_8cdb893f9c6b9d0b__:*)",
+      "Bash(say:*)",
+      "Bash(aws s3:*)",
+      "Bash(mkdir -p /Users/burhankhan/Documents/integrate-health-mvp/frontend/src/assets)",
+      "Bash(FIGMA_ASSETS=\"/Users/burhankhan/Documents/integrate-health-business-docs/Provider Portal Interface/src/assets\")",
+      "Bash(DEST=\"/Users/burhankhan/Documents/integrate-health-mvp/frontend/src/assets\")",
+      "Bash(cp \"$FIGMA_ASSETS/da660b4ff2e9cac9a0a851efd3d847e339ed5c5d.png\" \"$DEST/logo-full.png\")",
+      "Bash(cp \"$FIGMA_ASSETS/fc19db6a2ec92564c21e634a8d101ffd29ad9121.png\" \"$DEST/logo-login.png\")",
+      "Bash(cp \"$FIGMA_ASSETS/07ff6af0bc3c30add5381a779964ea3a84bd21f0.png\" \"$DEST/logo-icon.png\")",
+      "Bash(cp \"$FIGMA_ASSETS/a7d4287ab58f92036295fd15442c8e9f3057bf47.png\" \"$DEST/gradient-bg.png\")",
+      "Bash(cp \"$FIGMA_ASSETS/58e923487d9a78aa3fbf77e72ca9c561b0605643.png\" \"$DEST/session-gradient.png\")",
+      "Bash(cp \"$FIGMA_ASSETS/c4fcb2a24657eb6f4970c9b34b293cdfb23330f3.png\" \"$DEST/avatar.png\")",
+      "Bash(cp \"$FIGMA_ASSETS/ed27cc8a6dad70e5a0d6e5cca35b5cfb60b9d500.png\" \"$DEST/header-gradient.png\")",
+      "Bash(cp \"$FIGMA_ASSETS/579bc4d6908a1a42d85876697f2ec889eaa0e154.png\" \"$DEST/gradient-small.png\")",
+      "Read(//Users/burhankhan/Documents/integrate-health-mvp/frontend/**)",
+      "Bash(/tmp/ssm_check_frontend.json:*)",
+      "Bash(/tmp/ssm_check_nginx.json:*)",
+      "Bash(/tmp/ssm_deploy_frontend.json:*)",
+      "Bash(ls:*)",
+      "Bash(/tmp/ssm_deploy_frontend2.json:*)",
+      "Bash(/tmp/ssm_nginx_fix.json:*)"
     ]
   }
 }

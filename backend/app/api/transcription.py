@@ -34,6 +34,9 @@ class TranscriptionStatusResponse(BaseModel):
     status: str
     transcript: str | None = None
     error_message: str | None = None
+    confidence: float | None = None
+    num_speakers: int | None = None
+    segments: list | None = None
 
 
 class TranscribeResponse(BaseModel):
@@ -130,16 +133,28 @@ async def _process_transcription_async(visit_id: uuid.UUID, db_url: str) -> None
             logger.info(f"Starting transcription for visit {visit_id}")
             audio_path = visit.audio_file_path
 
-            # Run sync transcription
-            transcription_result = transcribe_audio_file(audio_path)
+            from app.config import get_settings
+            from app.services.transcription import transcribe_from_s3
+            settings = get_settings()
 
-            # Update visit with transcript
+            if settings.storage_mode == "s3":
+                transcription_result = transcribe_from_s3(audio_path)
+            else:
+                transcription_result = transcribe_audio_file(audio_path)
+
+            # Update visit with transcript and Deepgram metadata
             visit.transcript = transcription_result["transcript"]
             visit.transcription_status = "completed"
+            visit.transcription_error = None
 
-            # Update duration if we got a more accurate one from Deepgram
-            if transcription_result["metadata"].get("duration_seconds"):
-                visit.audio_duration_seconds = int(transcription_result["metadata"]["duration_seconds"])
+            metadata = transcription_result.get("metadata", {})
+            if metadata.get("duration_seconds"):
+                visit.audio_duration_seconds = int(metadata["duration_seconds"])
+            if metadata.get("confidence") is not None:
+                visit.transcription_confidence = metadata["confidence"]
+            if metadata.get("num_speakers") is not None:
+                visit.num_speakers = metadata["num_speakers"]
+            visit.transcript_segments = transcription_result.get("speakers") or []
 
             await db.commit()
             logger.info(f"Transcription completed for visit {visit_id}")
@@ -148,6 +163,7 @@ async def _process_transcription_async(visit_id: uuid.UUID, db_url: str) -> None
             logger.error(f"Transcription failed for visit {visit_id}")
             try:
                 visit.transcription_status = "failed"
+                visit.transcription_error = str(e)
                 await db.commit()
             except Exception:
                 pass
@@ -156,6 +172,7 @@ async def _process_transcription_async(visit_id: uuid.UUID, db_url: str) -> None
             logger.error(f"Unexpected error transcribing visit {visit_id}: {type(e).__name__}")
             try:
                 visit.transcription_status = "failed"
+                visit.transcription_error = str(e)
                 await db.commit()
             except Exception:
                 pass
@@ -281,12 +298,21 @@ async def get_transcription_status(
             detail="Visit not found",
         )
 
-    return TranscriptionStatusResponse(
+    response = TranscriptionStatusResponse(
         visit_id=visit.id,
         status=visit.transcription_status,
         transcript=visit.transcript if visit.transcription_status == "completed" else None,
-        error_message="Transcription failed. Please try again." if visit.transcription_status == "failed" else None,
+        error_message=visit.transcription_error if visit.transcription_status == "failed" else None,
     )
+
+    if visit.transcription_status == "completed":
+        response.confidence = visit.transcription_confidence
+        response.num_speakers = visit.num_speakers
+        response.segments = (visit.transcript_segments or [])[:10]
+    elif visit.transcription_status == "failed":
+        response.error_message = visit.transcription_error or "Transcription failed. Please try again."
+
+    return response
 
 
 @router.post(

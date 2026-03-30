@@ -7,8 +7,8 @@ Stores visit information including audio files and transcripts.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -77,6 +77,22 @@ class Visit(Base):
         default="pending",
         server_default="pending",
         index=True,
+    )
+    transcription_confidence: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+    )
+    num_speakers: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    transcript_segments: Mapped[dict | None] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+    transcription_error: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
     )
     is_live_transcription: Mapped[bool] = mapped_column(
         Boolean,

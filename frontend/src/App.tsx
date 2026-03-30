@@ -1,20 +1,19 @@
-/**
- * Root application component.
- *
- * Sets up routing for the application.
- */
-
 import { useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 
 import { ProtectedRoute } from './components/ProtectedRoute'
-import { Dashboard, Login, NewVisit, Register, VisitDetail } from './pages'
+import { Layout } from './components/Layout/Layout'
+import { Login } from './pages/Login'
+import { Register } from './pages/Register'
+import { Dashboard } from './pages/Dashboard'
+import { VisitDetail } from './pages/VisitDetail'
+import { PatientsList } from './pages/PatientsList'
+import { Settings } from './pages/Settings'
 import { useAuthStore } from './store/authStore'
 
 export const App = () => {
   const { loadUser, token } = useAuthStore()
 
-  // Load user on app start if token exists
   useEffect(() => {
     if (token) {
       loadUser()
@@ -27,37 +26,27 @@ export const App = () => {
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
 
-      {/* Protected routes */}
+      {/* Protected routes — all wrapped in Layout (nested routing) */}
       <Route
-        path="/dashboard"
+        path="/"
         element={
           <ProtectedRoute>
-            <Dashboard />
+            <Layout />
           </ProtectedRoute>
         }
-      />
-      <Route
-        path="/visits/new"
-        element={
-          <ProtectedRoute>
-            <NewVisit />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/visits/:id"
-        element={
-          <ProtectedRoute>
-            <VisitDetail />
-          </ProtectedRoute>
-        }
-      />
+      >
+        <Route index element={<Dashboard />} />
+        <Route path="patients" element={<PatientsList />} />
+        <Route path="visits/:visitId" element={<VisitDetail />} />
+        <Route path="settings" element={<Settings />} />
+      </Route>
 
-      {/* Default redirect */}
-      <Route path="/" element={<Navigate to="/dashboard" replace />} />
+      {/* Legacy redirects */}
+      <Route path="/dashboard" element={<Navigate to="/" replace />} />
+      <Route path="/visits/new" element={<Navigate to="/" replace />} />
 
       {/* 404 fallback */}
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
 }

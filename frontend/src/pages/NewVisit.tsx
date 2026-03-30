@@ -7,7 +7,7 @@
 import { useState, FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 
-import { Button, Card, Input, Layout } from '../components'
+import { Button, Card, Input } from '../components'
 import { useToast } from '../components/Toast'
 import { useVisitStore } from '../store/visitStore'
 
@@ -45,8 +45,7 @@ export const NewVisit = () => {
   }
 
   return (
-    <Layout>
-      <div className="mx-auto max-w-2xl">
+    <div className="mx-auto max-w-2xl">
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-gray-900">New Visit</h1>
           <p className="mt-1 text-sm text-gray-500">
@@ -124,6 +123,5 @@ export const NewVisit = () => {
           </form>
         </Card>
       </div>
-    </Layout>
   )
 }

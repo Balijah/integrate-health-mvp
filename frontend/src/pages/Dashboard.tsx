@@ -1,18 +1,11 @@
-/**
- * Dashboard page component.
- *
- * Shows list of visits for the authenticated user.
- */
+import { useState, useEffect } from 'react'
+import { useNavigate, useOutletContext } from 'react-router-dom'
+import { motion } from 'framer-motion'
 
-import { useEffect } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { getVisits, VisitResponse } from '../api/visits'
+import { LayoutContext } from '../components/Layout/Layout'
+import sessionGradientImg from '../assets/session-gradient.png'
 
-import { Button, Card, Layout } from '../components'
-import { useVisitStore } from '../store/visitStore'
-
-/**
- * Format date for display.
- */
 const formatDate = (dateString: string): string => {
   const date = new Date(dateString)
   return date.toLocaleDateString('en-US', {
@@ -24,158 +17,103 @@ const formatDate = (dateString: string): string => {
   })
 }
 
-/**
- * Get status badge color.
- */
-const getStatusColor = (status: string): string => {
-  switch (status) {
-    case 'completed':
-      return 'bg-green-100 text-green-800'
-    case 'transcribing':
-      return 'bg-yellow-100 text-yellow-800'
-    case 'failed':
-      return 'bg-red-100 text-red-800'
-    default:
-      return 'bg-gray-100 text-gray-800'
-  }
-}
-
 export const Dashboard = () => {
   const navigate = useNavigate()
-  const { visits, total, isLoading, error, fetchVisits } = useVisitStore()
+  const { openNewSession } = useOutletContext<LayoutContext>()
+  const [visits, setVisits] = useState<VisitResponse[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [heroHovered, setHeroHovered] = useState(false)
 
   useEffect(() => {
-    fetchVisits()
-  }, [fetchVisits])
+    setIsLoading(true)
+    getVisits(3, 0)
+      .then(res => setVisits(res.items))
+      .catch(() => {})
+      .finally(() => setIsLoading(false))
+  }, [])
 
   return (
-    <Layout>
-      {/* Header */}
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Visits</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            {total} total visit{total !== 1 ? 's' : ''}
-          </p>
-        </div>
-        <Link to="/visits/new" className="w-full sm:w-auto">
-          <Button className="w-full sm:w-auto">New Visit</Button>
-        </Link>
+    <div className="w-full h-full pt-[5%]">
+      <h1 className="text-4xl mb-1">welcome back</h1>
+      <p className="italic text-gray-500 mb-8">Here's your practice overview</p>
+
+      {/* Hero CTA */}
+      <motion.button
+        onHoverStart={() => setHeroHovered(true)}
+        onHoverEnd={() => setHeroHovered(false)}
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+        transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+        onClick={openNewSession}
+        className="relative w-full h-36 rounded-2xl border-2 border-[#4ac6d6] overflow-hidden mb-10 flex items-center justify-center"
+        style={{
+          backgroundImage: `url(${sessionGradientImg})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+        }}
+      >
+        <div
+          className="absolute inset-0"
+          style={{ background: 'linear-gradient(135deg, #4ac6d6cc 0%, #2a8fa0cc 100%)' }}
+        />
+        <span className="relative z-10 text-3xl text-white drop-shadow-lg font-normal">
+          start a new session
+        </span>
+        {/* Shine sweep */}
+        <motion.div
+          className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent pointer-events-none"
+          animate={{ x: heroHovered ? '200%' : '-100%' }}
+          transition={{ duration: 0.6, ease: 'easeInOut' }}
+        />
+      </motion.button>
+
+      {/* Recent Activity */}
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-2xl">Recent Activity</h2>
+        <button
+          onClick={() => navigate('/patients')}
+          className="text-sm text-[#4ac6d6] hover:text-[#3ab5c5]"
+        >
+          view all →
+        </button>
       </div>
 
-      {/* Error state */}
-      {error && (
-        <div className="mb-4 rounded-md bg-red-50 p-4">
-          <p className="text-sm text-red-700">{error}</p>
-        </div>
-      )}
-
-      {/* Loading state */}
-      {isLoading && visits.length === 0 && (
-        <div className="flex items-center justify-center py-12">
-          <div className="text-center">
-            <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary-500 border-t-transparent mx-auto"></div>
-            <p className="mt-2 text-sm text-gray-600">Loading visits...</p>
-          </div>
-        </div>
-      )}
-
-      {/* Empty state */}
-      {!isLoading && visits.length === 0 && (
-        <Card>
-          <div className="py-12 text-center">
-            <svg
-              className="mx-auto h-12 w-12 text-gray-400"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.5}
-                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-              />
-            </svg>
-            <h3 className="mt-4 text-lg font-medium text-gray-900">
-              No visits yet
-            </h3>
-            <p className="mt-2 text-sm text-gray-500">
-              Get started by creating your first patient visit.
-            </p>
-            <div className="mt-6">
-              <Link to="/visits/new">
-                <Button>Create First Visit</Button>
-              </Link>
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {/* Visits list */}
-      {visits.length > 0 && (
-        <div className="space-y-4">
-          {visits.map((visit) => (
-            <Card
-              key={visit.id}
-              hoverable
-              onClick={() => navigate(`/visits/${visit.id}`)}
-              padding="none"
-            >
-              <div className="flex items-center justify-between p-4">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-3">
-                    <h3 className="truncate text-lg font-medium text-gray-900">
-                      {visit.patient_ref}
-                    </h3>
-                    <span
-                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${getStatusColor(
-                        visit.transcription_status
-                      )}`}
-                    >
-                      {visit.transcription_status}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-sm text-gray-500">
-                    {formatDate(visit.visit_date)}
-                  </p>
-                  {visit.chief_complaint && (
-                    <p className="mt-1 truncate text-sm text-gray-600">
-                      {visit.chief_complaint}
-                    </p>
-                  )}
-                </div>
-                <div className="ml-4 flex items-center">
-                  <svg
-                    className="h-5 w-5 text-gray-400"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                </div>
+      <div className="bg-white border border-[#4ac6d6] rounded-2xl shadow-md overflow-hidden">
+        {isLoading ? (
+          <div className="p-8 space-y-4">
+            {[0, 1, 2].map(i => (
+              <div key={i} className="animate-pulse">
+                <div className="h-3 bg-gray-200 rounded w-24 mb-2" />
+                <div className="h-4 bg-gray-200 rounded w-48 mb-1" />
+                <div className="h-3 bg-gray-200 rounded w-32" />
               </div>
-            </Card>
-          ))}
-        </div>
-      )}
-
-      {/* Pagination placeholder */}
-      {total > visits.length && (
-        <div className="mt-6 flex justify-center">
-          <Button
-            variant="secondary"
-            onClick={() => fetchVisits(20, visits.length)}
-            isLoading={isLoading}
-          >
-            Load More
-          </Button>
-        </div>
-      )}
-    </Layout>
+            ))}
+          </div>
+        ) : visits.length === 0 ? (
+          <div className="p-8 text-center">
+            <p className="italic text-gray-500">No recent visits</p>
+          </div>
+        ) : (
+          visits.map((visit, idx) => (
+            <button
+              key={visit.id}
+              onClick={() => navigate(`/visits/${visit.id}`)}
+              className={`w-full text-left px-8 py-6 hover:bg-gray-50 transition-colors ${
+                idx < visits.length - 1 ? 'border-b border-gray-100' : ''
+              }`}
+            >
+              <div className="text-xs text-gray-500 mb-1">{formatDate(visit.visit_date)}</div>
+              <div className="text-gray-900 mb-1">
+                {visit.patient_ref}
+                {visit.chief_complaint && (
+                  <span className="text-gray-600"> — {visit.chief_complaint}</span>
+                )}
+              </div>
+              <div className="text-sm italic text-gray-500">{visit.transcription_status}</div>
+            </button>
+          ))
+        )}
+      </div>
+    </div>
   )
 }

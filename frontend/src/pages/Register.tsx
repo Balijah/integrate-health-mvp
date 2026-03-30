@@ -22,7 +22,7 @@ export const Register = () => {
   // Redirect if already authenticated
   useEffect(() => {
     if (isAuthenticated) {
-      navigate('/dashboard')
+      navigate('/')
     }
   }, [isAuthenticated, navigate])
 
@@ -154,14 +154,14 @@ export const Register = () => {
           <button
             type="submit"
             disabled={isLoading}
-            className="flex w-full justify-center rounded-md bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex w-full justify-center rounded-xl bg-[#4ac6d6] hover:bg-[#3ab5c5] px-4 py-3 text-sm font-medium text-gray-900 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isLoading ? 'Creating account...' : 'Create account'}
           </button>
 
           <p className="text-center text-sm text-gray-600">
             Already have an account?{' '}
-            <Link to="/login" className="font-medium text-primary-600 hover:text-primary-500">
+            <Link to="/login" className="font-medium text-[#4ac6d6] hover:text-[#3ab5c5]">
               Sign in here
             </Link>
           </p>
