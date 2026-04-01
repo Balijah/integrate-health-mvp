@@ -20,7 +20,8 @@ class UserCreate(BaseModel):
         max_length=128,
         description="Password (min 8 characters)",
     )
-    full_name: str = Field(
+    full_name: str
+    profile_picture_url: str | None = None = Field(
         ...,
         min_length=1,
         max_length=255,

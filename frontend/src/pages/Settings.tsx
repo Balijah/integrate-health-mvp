@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { LogOut } from 'lucide-react'
+import { LogOut, Camera } from 'lucide-react'
 
 import { useAuthStore } from '../store/authStore'
+import { apiClient } from '../api/client'
 
 interface ToggleProps {
   checked: boolean
@@ -32,6 +33,26 @@ export const Settings = () => {
   const [email, setEmail] = useState(user?.email || '')
   const [phone, setPhone] = useState('')
   const [saved, setSaved] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [profilePicUrl, setProfilePicUrl] = useState(user?.profile_picture_url || null)
+
+  const handleUploadPicture = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await apiClient.post('/api/v1/profile/picture', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      setProfilePicUrl(res.data.profile_picture_url)
+    } catch (err) {
+      console.error('Upload failed', err)
+    } finally {
+      setUploading(false)
+    }
+  }
 
   const [notifications, setNotifications] = useState({
     email: true,
@@ -61,6 +82,27 @@ export const Settings = () => {
       <div className="mb-12">
         <h2 className="text-2xl mb-6">Profile Information</h2>
         <div className="bg-white border border-[#4ac6d6] rounded-2xl p-8 shadow-md">
+          {/* Profile Picture */}
+          <div className="flex items-center gap-6 mb-8">
+            <div className="relative">
+              {profilePicUrl ? (
+                <img src={profilePicUrl} alt="Profile" className="w-20 h-20 rounded-full object-cover" />
+              ) : (
+                <div className="w-20 h-20 rounded-full flex items-center justify-center text-white text-xl font-medium"
+                  style={{ background: 'linear-gradient(135deg, #4ac6d6 0%, #2a8fa0 100%)' }}>
+                  {(user?.full_name || 'P').split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                </div>
+              )}
+              <label className="absolute bottom-0 right-0 w-7 h-7 bg-[#4ac6d6] rounded-full flex items-center justify-center cursor-pointer hover:bg-[#3ab5c5] transition-colors">
+                <Camera size={14} className="text-white" />
+                <input type="file" accept="image/*" onChange={handleUploadPicture} className="hidden" />
+              </label>
+            </div>
+            <div>
+              <p className="text-sm font-medium text-gray-900">{uploading ? 'Uploading...' : 'Profile Picture'}</p>
+              <p className="text-xs italic text-gray-500">Click the camera icon to upload</p>
+            </div>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
