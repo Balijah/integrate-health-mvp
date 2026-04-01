@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { LogOut, Camera } from 'lucide-react'
 
@@ -37,6 +37,17 @@ export const Settings = () => {
   const [uploading, setUploading] = useState(false)
   const [profilePicUrl, setProfilePicUrl] = useState(user?.profile_picture_url || null)
 
+  // Sync form fields when authStore user updates (e.g. after save or upload)
+  useEffect(() => {
+    if (!user) return
+    const parts = user.full_name.split(' ')
+    setFirstName(parts[0] || '')
+    setLastName(parts.slice(1).join(' ') || '')
+    setEmail(user.email)
+    setPhone(user.phone || '')
+    setProfilePicUrl(user.profile_picture_url || null)
+  }, [user])
+
   const handleUploadPicture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -44,7 +55,7 @@ export const Settings = () => {
     try {
       const formData = new FormData()
       formData.append('file', file)
-      const res = await apiClient.post('/api/v1/profile/picture', formData, {
+      const res = await apiClient.post('/profile/picture', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
       setProfilePicUrl(res.data.profile_picture_url)

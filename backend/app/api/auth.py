@@ -27,6 +27,7 @@ limiter = Limiter(key_func=get_remote_address)
 class UpdateMeRequest(BaseModel):
     full_name: str | None = None
     email: EmailStr | None = None
+    phone: str | None = None
 
 
 @router.post(
