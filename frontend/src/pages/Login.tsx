@@ -101,7 +101,7 @@ export const Login = () => {
             <div className="flex justify-end">
               <button
                 type="button"
-                onClick={() => alert('Password reset coming soon.')}
+                onClick={() => window.location.href = '/forgot-password'}
                 className="text-sm text-[#4ac6d6] hover:text-[#3ab5c5]"
               >
                 forgot password?

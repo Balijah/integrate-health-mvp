@@ -9,6 +9,8 @@ import { Dashboard } from './pages/Dashboard'
 import { VisitDetail } from './pages/VisitDetail'
 import { PatientsList } from './pages/PatientsList'
 import { Settings } from './pages/Settings'
+import { ForgotPassword } from './pages/ForgotPassword'
+import { ResetPassword } from './pages/ResetPassword'
 import { useAuthStore } from './store/authStore'
 
 export const App = () => {
@@ -25,6 +27,8 @@ export const App = () => {
       {/* Public routes */}
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
 
       {/* Protected routes — all wrapped in Layout (nested routing) */}
       <Route
