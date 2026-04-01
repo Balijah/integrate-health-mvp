@@ -21,12 +21,6 @@ class UserCreate(BaseModel):
         description="Password (min 8 characters)",
     )
     full_name: str
-    profile_picture_url: str | None = None = Field(
-        ...,
-        min_length=1,
-        max_length=255,
-        description="User's full name",
-    )
 
 
 class UserResponse(BaseModel):
@@ -38,6 +32,7 @@ class UserResponse(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    profile_picture_url: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
