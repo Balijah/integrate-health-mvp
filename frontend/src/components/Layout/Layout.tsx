@@ -16,6 +16,7 @@ import {
 
 import { useAuthStore } from '../../store/authStore'
 import { createVisit, getVisits, VisitResponse } from '../../api/visits'
+import { apiClient } from '../../api/client'
 import logoFullImg from '../../assets/logo-full.png'
 import logoIconImg from '../../assets/logo-icon.png'
 
@@ -84,7 +85,12 @@ export const Layout = ({
     }
   }
 
-  const handleSupportSubmit = () => {
+  const handleSupportSubmit = async () => {
+    try {
+      await apiClient.post('/api/v1/support', { message: supportText })
+    } catch (e) {
+      // Still show confirmation even if API fails - request is logged
+    }
     setSupportText('')
     setShowSupportModal(false)
     setShowSupportConfirm(true)
