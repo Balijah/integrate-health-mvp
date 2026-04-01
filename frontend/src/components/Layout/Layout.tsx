@@ -100,11 +100,11 @@ export const Layout = ({
         className="flex flex-col bg-white border-r border-gray-100 overflow-hidden flex-shrink-0"
       >
         {/* Logo */}
-        <div className="h-20 flex items-center justify-center px-4 border-b border-gray-50 flex-shrink-0">
+        <div onClick={() => navigate('/')} className="h-20 flex items-center justify-center px-4 border-b border-gray-50 flex-shrink-0 cursor-pointer">
           {sidebarCollapsed ? (
-            <img src={logoIconImg} alt="ih" className="h-10 w-10 object-contain" />
+            <img src={logoIconImg} alt="ih" className="h-12 w-12 object-contain" />
           ) : (
-            <img src={logoFullImg} alt="integrate health" className="h-10 object-contain" />
+            <img src={logoFullImg} alt="integrate health" className="h-14 object-contain" />
           )}
         </div>
 
