@@ -5,6 +5,7 @@ Handles user registration, login, and current user retrieval.
 """
 
 from fastapi import APIRouter, HTTPException, Request, status
+from pydantic import BaseModel, EmailStr
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
@@ -16,10 +17,16 @@ from app.services.auth import (
     create_access_token,
     create_user,
     get_user_by_email,
+    update_user,
 )
 
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
+
+
+class UpdateMeRequest(BaseModel):
+    full_name: str | None = None
+    email: EmailStr | None = None
 
 
 @router.post(
@@ -130,3 +137,26 @@ async def get_me(
         UserResponse: Current user data
     """
     return UserResponse.model_validate(current_user)
+
+
+@router.patch(
+    "/me",
+    response_model=UserResponse,
+    summary="Update current user",
+    description="Update the current user's name or email.",
+)
+async def update_me(
+    data: UpdateMeRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> UserResponse:
+    """Update the current authenticated user's profile."""
+    if data.email and data.email != current_user.email:
+        existing = await get_user_by_email(db, data.email)
+        if existing is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already in use",
+            )
+    user = await update_user(db, current_user, full_name=data.full_name, email=data.email, phone=data.phone)
+    return UserResponse.model_validate(user)

@@ -33,6 +33,7 @@ class UserResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     profile_picture_url: str | None = None
+    phone: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

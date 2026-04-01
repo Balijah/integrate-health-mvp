@@ -4,6 +4,7 @@ import { LogOut, Camera } from 'lucide-react'
 
 import { useAuthStore } from '../store/authStore'
 import { apiClient } from '../api/client'
+import { updateMe } from '../api/auth'
 
 interface ToggleProps {
   checked: boolean
@@ -25,13 +26,13 @@ function Toggle({ checked, onChange }: ToggleProps) {
 
 export const Settings = () => {
   const navigate = useNavigate()
-  const { user, logout } = useAuthStore()
+  const { user, logout, loadUser } = useAuthStore()
 
   const nameParts = (user?.full_name || '').split(' ')
   const [firstName, setFirstName] = useState(nameParts[0] || '')
   const [lastName, setLastName] = useState(nameParts.slice(1).join(' ') || '')
   const [email, setEmail] = useState(user?.email || '')
-  const [phone, setPhone] = useState('')
+  const [phone, setPhone] = useState(user?.phone || '')
   const [saved, setSaved] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [profilePicUrl, setProfilePicUrl] = useState(user?.profile_picture_url || null)
@@ -47,6 +48,7 @@ export const Settings = () => {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
       setProfilePicUrl(res.data.profile_picture_url)
+      await loadUser()
     } catch (err) {
       console.error('Upload failed', err)
     } finally {
@@ -61,9 +63,15 @@ export const Settings = () => {
     marketing: false,
   })
 
-  const handleSave = () => {
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+  const handleSave = async () => {
+    try {
+      await updateMe({ full_name: `${firstName} ${lastName}`.trim(), email, phone: phone || undefined })
+      await loadUser()
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch (err) {
+      console.error('Save failed', err)
+    }
   }
 
   const handleLogout = () => {

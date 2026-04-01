@@ -104,7 +104,8 @@
       "Bash(open:*)",
       "Bash(npx tsc:*)",
       "Bash(COPYFILE_DISABLE=1 tar:*)",
-      "Bash(aws ssm:*)"
+      "Bash(aws ssm:*)",
+      "Bash(./deploy.sh:*)"
     ]
   }
 }

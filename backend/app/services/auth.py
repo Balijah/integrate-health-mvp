@@ -155,6 +155,37 @@ async def get_user_by_id(db: AsyncSession, user_id: str) -> User | None:
     return result.scalar_one_or_none()
 
 
+async def update_user(
+    db: AsyncSession,
+    user: User,
+    full_name: str | None = None,
+    email: str | None = None,
+    phone: str | None = None,
+) -> User:
+    """
+    Update a user's profile fields.
+
+    Args:
+        db: Database session
+        user: User instance to update
+        full_name: New full name (optional)
+        email: New email address (optional)
+
+    Returns:
+        User: Updated user instance
+    """
+    if full_name is not None:
+        user.full_name = full_name
+    if email is not None:
+        user.email = email
+    if phone is not None:
+        user.phone = phone
+    await db.flush()
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
 async def create_user(
     db: AsyncSession,
     email: str,

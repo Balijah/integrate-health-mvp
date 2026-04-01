@@ -42,6 +42,7 @@ export interface UserResponse {
   created_at: string
   updated_at: string
   profile_picture_url: string | null
+  phone: string | null
 }
 
 /**
@@ -73,5 +74,16 @@ export const login = async (data: LoginRequest): Promise<TokenResponse> => {
  */
 export const getCurrentUser = async (): Promise<UserResponse> => {
   const response = await apiClient.get<UserResponse>('/auth/me')
+  return response.data
+}
+
+/**
+ * Update the current user's profile (name/email).
+ *
+ * @param data - Fields to update
+ * @returns Updated user data
+ */
+export const updateMe = async (data: { full_name?: string; email?: string; phone?: string }): Promise<UserResponse> => {
+  const response = await apiClient.patch<UserResponse>('/auth/me', data)
   return response.data
 }

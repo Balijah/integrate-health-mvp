@@ -17,7 +17,7 @@ import {
 import { useAuthStore } from '../../store/authStore'
 import { createVisit, getVisits, VisitResponse } from '../../api/visits'
 import { apiClient } from '../../api/client'
-import logoFullImg from '../../assets/logo-full.png'
+import logoFullImg from '../../assets/logo-full.jpg'
 import logoIconImg from '../../assets/logo-icon.png'
 
 export interface LayoutContext {
@@ -60,7 +60,7 @@ export const Layout = ({
 
   useEffect(() => {
     getVisits(50, 0).then(res => setVisits(res.items)).catch(() => {})
-  }, [])
+  }, [location.pathname])
 
   const filteredVisits = visits.filter(v =>
     v.patient_ref.toLowerCase().includes(patientSearch.toLowerCase())
@@ -109,7 +109,7 @@ export const Layout = ({
           {sidebarCollapsed ? (
             <img src={logoIconImg} alt="ih" className="h-12 w-12 object-contain" />
           ) : (
-            <img src={logoFullImg} alt="integrate health" className="h-14 object-contain" />
+            <img src={logoFullImg} alt="integrate health" className="h-16 object-contain" />
           )}
         </div>
 

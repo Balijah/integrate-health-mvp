@@ -66,34 +66,18 @@ async def upload_profile_picture(
     ext = file.filename.rsplit(".", 1)[-1] if file.filename and "." in file.filename else "jpg"
     filename = f"profile_{current_user.id}.{ext}"
     
-    if settings.storage_mode == "s3" and settings.s3_bucket_name:
-        # Upload to S3
-        try:
-            import boto3
-            s3 = boto3.client("s3", region_name=settings.aws_region)
-            key = f"profiles/{filename}"
-            s3.put_object(
-                Bucket=settings.s3_bucket_name,
-                Key=key,
-                Body=contents,
-                ContentType=file.content_type,
-            )
-            picture_url = f"https://{settings.s3_bucket_name}.s3.amazonaws.com/{key}"
-        except Exception as e:
-            logger.error(f"S3 upload failed: {e}")
-            raise HTTPException(status_code=500, detail="Failed to upload image")
-    else:
-        # Save locally
-        upload_dir = os.path.join(settings.upload_dir, "profiles")
-        os.makedirs(upload_dir, exist_ok=True)
-        filepath = os.path.join(upload_dir, filename)
-        with open(filepath, "wb") as f:
-            f.write(contents)
-        picture_url = f"/uploads/profiles/{filename}"
-    
+    # Always save locally so the URL is directly servable via nginx /uploads/
+    upload_dir = os.path.join(settings.upload_dir, "profiles")
+    os.makedirs(upload_dir, exist_ok=True)
+    filepath = os.path.join(upload_dir, filename)
+    with open(filepath, "wb") as f:
+        f.write(contents)
+    picture_url = f"/uploads/profiles/{filename}"
+
     # Update user record
     current_user.profile_picture_url = picture_url
     await db.flush()
+    await db.commit()
     await db.refresh(current_user)
     
     logger.info(f"Profile picture uploaded for user {current_user.email}: {picture_url}")
