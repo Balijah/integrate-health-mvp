@@ -82,24 +82,39 @@ if [ "$SKIP_FRONTEND" = false ]; then
   npm run build
   cd ..
 
-  echo "=== Syncing to S3 ==="
-  # Assets: long cache (content-hashed filenames)
-  aws s3 sync frontend/dist/ "s3://${S3_FRONTEND}/" \
-    --delete \
-    --cache-control "public,max-age=31536000,immutable" \
-    --exclude "index.html"
+  echo "=== Packaging frontend dist ==="
+  COPYFILE_DISABLE=1 tar -czf /tmp/frontend-dist.tar.gz \
+    --exclude='*/._*' \
+    --exclude='.DS_Store' \
+    frontend/dist/
 
-  # index.html: no cache (always fetch latest)
-  aws s3 cp frontend/dist/index.html "s3://${S3_FRONTEND}/index.html" \
-    --cache-control "no-cache,no-store,must-revalidate"
+  echo "=== Uploading to S3 ==="
+  aws s3 cp /tmp/frontend-dist.tar.gz "s3://${S3_AUDIO}/deploys/frontend-dist.tar.gz"
 
-  echo "=== Invalidating CloudFront cache ==="
-  aws cloudfront create-invalidation \
-    --distribution-id "$CF_DISTRIBUTION" \
-    --paths "/*" \
-    --query 'Invalidation.{Id:Id,Status:Status}' \
-    --output json
+  echo "=== Deploying frontend to EC2 (SSM) ==="
+  FE_CMD_ID=$(aws ssm send-command \
+    --instance-ids "$INSTANCE_ID" \
+    --document-name "AWS-RunShellScript" \
+    --timeout-seconds 60 \
+    --parameters "commands=[
+      \"set -e\",
+      \"aws s3 cp s3://${S3_AUDIO}/deploys/frontend-dist.tar.gz /tmp/frontend-dist.tar.gz\",
+      \"sudo tar -xzf /tmp/frontend-dist.tar.gz -C /var/www/html/ --strip-components=2\",
+      \"sudo nginx -t && sudo systemctl reload nginx\"
+    ]" \
+    --query 'Command.CommandId' --output text)
 
+  echo "=== Waiting for frontend deploy (command: $FE_CMD_ID) ==="
+  sleep 15
+  FE_STATUS=$(aws ssm get-command-invocation \
+    --command-id "$FE_CMD_ID" \
+    --instance-id "$INSTANCE_ID" \
+    --query 'Status' --output text)
+
+  if [ "$FE_STATUS" != "Success" ]; then
+    echo "ERROR: Frontend deploy failed with status: $FE_STATUS"
+    exit 1
+  fi
   echo "=== Frontend deploy complete ==="
 fi
 
