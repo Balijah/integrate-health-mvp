@@ -351,7 +351,7 @@ export const VisitDetail = () => {
   if (!visit) return null
 
   return (
-    <div className="w-full max-w-3xl mx-auto pb-16">
+    <div className="w-full max-w-5xl mx-auto pb-16">
       {/* Page Header */}
       <div className="mb-8 flex items-start justify-between mt-12">
         <div>
@@ -569,7 +569,7 @@ export const VisitDetail = () => {
                 <textarea
                   value={noteTexts[section]}
                   onChange={e => setNoteTexts(prev => ({ ...prev, [section]: e.target.value }))}
-                  className="w-full min-h-[80px] resize-y text-sm text-gray-700 focus:outline-none bg-transparent"
+                  className="w-full min-h-[200px] resize-y text-sm text-gray-700 focus:outline-none bg-transparent"
                   placeholder={sectionPlaceholders[section]}
                 />
               </div>
