@@ -18,7 +18,6 @@ import { useAuthStore } from '../../store/authStore'
 import { createVisit, getVisits, VisitResponse } from '../../api/visits'
 import logoFullImg from '../../assets/logo-full.png'
 import logoIconImg from '../../assets/logo-icon.png'
-import avatarImg from '../../assets/avatar.png'
 
 export interface LayoutContext {
   openNewSession: () => void
@@ -321,11 +320,10 @@ export const Layout = ({
               <div className="text-sm text-gray-900">{user?.full_name || 'Provider'}</div>
               <div className="text-xs italic text-gray-500">welcome back</div>
             </div>
-            <img
-              src={avatarImg}
-              alt="profile"
-              className="w-10 h-10 rounded-full object-cover"
-            />
+            <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-medium text-sm"
+              style={{ background: 'linear-gradient(135deg, #4ac6d6 0%, #2a8fa0 100%)' }}>
+              {(user?.full_name || 'P').split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+            </div>
           </button>
         </header>
 
