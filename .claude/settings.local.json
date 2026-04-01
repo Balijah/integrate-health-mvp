@@ -100,7 +100,11 @@
       "Bash(/tmp/ssm_deploy_frontend.json:*)",
       "Bash(ls:*)",
       "Bash(/tmp/ssm_deploy_frontend2.json:*)",
-      "Bash(/tmp/ssm_nginx_fix.json:*)"
+      "Bash(/tmp/ssm_nginx_fix.json:*)",
+      "Bash(open:*)",
+      "Bash(npx tsc:*)",
+      "Bash(COPYFILE_DISABLE=1 tar:*)",
+      "Bash(aws ssm:*)"
     ]
   }
 }
