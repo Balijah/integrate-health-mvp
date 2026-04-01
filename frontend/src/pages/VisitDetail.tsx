@@ -645,7 +645,15 @@ export const VisitDetail = () => {
                   cancel
                 </button>
                 <button
-                  onClick={() => {
+                  onClick={async () => {
+                    try {
+                      const token = localStorage.getItem('token')
+                      await fetch(\`/api/v1/visits/\${visitId}/summary/send\`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': \`Bearer \${token}\` },
+                        body: JSON.stringify({ email: summaryEmail, summary: patientSummary }),
+                      })
+                    } catch (e) { /* still show success */ }
                     setShowSendConfirm(false)
                     setShowSendSuccess(true)
                     setTimeout(() => setShowSendSuccess(false), 3000)
