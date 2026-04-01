@@ -51,7 +51,7 @@ export const Settings = () => {
   }
 
   return (
-    <div className="w-full max-w-2xl">
+    <div className="w-full max-w-4xl">
       <div className="mb-8 mt-12">
         <h1 className="text-4xl mb-1">Settings</h1>
         <p className="italic text-gray-500">Manage your account and preferences</p>
