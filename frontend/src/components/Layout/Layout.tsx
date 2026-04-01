@@ -466,7 +466,7 @@ function NewSessionButton({ onClick }: { onClick: () => void }) {
       whileHover={{ scale: 1.02 }}
       whileTap={{ scale: 0.98 }}
       onClick={onClick}
-      className="relative overflow-hidden flex items-center gap-2 border-2 border-[#4ac6d6] bg-[#4ac6d6]/20 rounded-xl px-5 py-2.5 text-gray-900"
+      className="relative overflow-hidden flex items-center gap-2 rounded-xl px-5 py-2.5 text-white" style={{ background: 'linear-gradient(135deg, #4ac6d6 0%, #2a8fa0 100%)' }}
     >
       <span className="text-sm font-medium relative z-10">start new session</span>
       <motion.div
