@@ -105,7 +105,10 @@
       "Bash(npx tsc:*)",
       "Bash(COPYFILE_DISABLE=1 tar:*)",
       "Bash(aws ssm:*)",
-      "Bash(./deploy.sh:*)"
+      "Bash(./deploy.sh:*)",
+      "Bash(terraform version:*)",
+      "Bash(terraform plan:*)",
+      "Bash(terraform apply:*)"
     ]
   }
 }

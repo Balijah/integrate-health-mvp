@@ -50,11 +50,6 @@ output "app_security_group_id" {
   value       = aws_security_group.app.id
 }
 
-output "whisper_security_group_id" {
-  description = "Whisper server security group ID"
-  value       = aws_security_group.whisper.id
-}
-
 output "ec2_instance_profile_name" {
   description = "EC2 instance profile name"
   value       = aws_iam_instance_profile.ec2.name

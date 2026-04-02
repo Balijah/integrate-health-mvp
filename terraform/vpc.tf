@@ -169,8 +169,8 @@ resource "aws_security_group" "vpc_endpoints" {
     from_port       = 443
     to_port         = 443
     protocol        = "tcp"
-    security_groups = [aws_security_group.app.id, aws_security_group.whisper.id]
-    description     = "HTTPS from app and whisper servers"
+    security_groups = [aws_security_group.app.id]
+    description     = "HTTPS from app server"
   }
 
   tags = {

@@ -102,29 +102,3 @@ resource "aws_iam_instance_profile" "ec2" {
   role = aws_iam_role.ec2.name
 }
 
-# Spot Fleet IAM role (for Whisper Spot instances)
-resource "aws_iam_role" "spot_fleet" {
-  count = var.use_spot_for_whisper ? 1 : 0
-  name  = "integrate-health-spot-fleet-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
-      Principal = {
-        Service = "spotfleet.amazonaws.com"
-      }
-    }]
-  })
-
-  tags = {
-    Name = "integrate-health-spot-fleet-role"
-  }
-}
-
-resource "aws_iam_role_policy_attachment" "spot_fleet" {
-  count      = var.use_spot_for_whisper ? 1 : 0
-  role       = aws_iam_role.spot_fleet[0].name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEC2SpotFleetTaggingRole"
-}

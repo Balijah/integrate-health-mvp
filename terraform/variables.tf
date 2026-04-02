@@ -35,12 +35,6 @@ variable "app_instance_type" {
   default     = "t3.small"
 }
 
-variable "whisper_instance_type" {
-  description = "EC2 instance type for Whisper GPU server"
-  type        = string
-  default     = "g4dn.xlarge"
-}
-
 variable "db_instance_class" {
   description = "RDS instance class"
   type        = string
@@ -55,12 +49,6 @@ variable "db_allocated_storage" {
 
 variable "enable_nat_gateway" {
   description = "Enable NAT Gateway for private subnet internet access"
-  type        = bool
-  default     = true
-}
-
-variable "use_spot_for_whisper" {
-  description = "Use Spot instances for Whisper (cost savings with interruption risk)"
   type        = bool
   default     = true
 }
