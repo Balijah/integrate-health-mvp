@@ -12,7 +12,7 @@ export const ForgotPassword = () => {
     e.preventDefault()
     setIsLoading(true)
     try {
-      await apiClient.post('/api/v1/auth/forgot-password', { email })
+      await apiClient.post('/auth/forgot-password', { email })
     } catch { /* always show success to prevent enumeration */ }
     setIsLoading(false)
     setSubmitted(true)

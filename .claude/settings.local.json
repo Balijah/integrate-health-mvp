@@ -108,7 +108,8 @@
       "Bash(./deploy.sh:*)",
       "Bash(terraform version:*)",
       "Bash(terraform plan:*)",
-      "Bash(terraform apply:*)"
+      "Bash(terraform apply:*)",
+      "Bash(bash:*)"
     ]
   }
 }

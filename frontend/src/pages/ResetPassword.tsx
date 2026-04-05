@@ -32,7 +32,7 @@ export const ResetPassword = () => {
 
     setIsLoading(true)
     try {
-      await apiClient.post('/api/v1/auth/reset-password', {
+      await apiClient.post('/auth/reset-password', {
         token,
         new_password: password,
       })

@@ -87,7 +87,7 @@ export const Layout = ({
 
   const handleSupportSubmit = async () => {
     try {
-      await apiClient.post('/api/v1/support', { message: supportText })
+      await apiClient.post('/support', { message: supportText })
     } catch (e) {
       // Still show confirmation even if API fails - request is logged
     }
@@ -109,7 +109,7 @@ export const Layout = ({
           {sidebarCollapsed ? (
             <img src={logoIconImg} alt="ih" className="h-12 w-12 object-contain" />
           ) : (
-            <img src={logoFullImg} alt="integrate health" className="h-16 object-contain" />
+            <img src={logoFullImg} alt="integrate health" className="w-2/3 h-auto object-contain" />
           )}
         </div>
 

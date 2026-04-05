@@ -16,7 +16,6 @@ router = APIRouter()
 
 SUPPORT_EMAILS = [
     "burhankhan@integratehealth.ai",
-    "hallesutton@integratehealth.ai",
 ]
 
 
@@ -62,7 +61,7 @@ async def submit_support(
         body = f"From: {user_name} ({user_email})\n\nMessage:\n{request.message}"
         
         ses.send_email(
-            Source="support@integratehealth.ai",
+            Source="burhankhan@integratehealth.ai",
             Destination={"ToAddresses": SUPPORT_EMAILS},
             Message={
                 "Subject": {"Data": subject},
