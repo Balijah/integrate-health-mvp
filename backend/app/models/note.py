@@ -58,6 +58,12 @@ class Note(Base):
         server_default="draft",
         index=True,
     )
+    synced_sections: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default="{}",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

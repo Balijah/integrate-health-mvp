@@ -64,6 +64,11 @@ def _parse_deepgram_response(response) -> dict:
             "confidence": float(utt.confidence or 0.0),
         })
 
+    # Fallback: if main transcript is empty but utterances have content, build from utterances
+    if not transcript.strip() and segments:
+        transcript = " ".join(s["text"] for s in segments if s.get("text"))
+        logger.warning("Main transcript was empty; rebuilt from utterances.")
+
     unique_speakers = len({s["speaker"] for s in segments}) if segments else 0
     duration = float(response.metadata.duration) if response.metadata else 0.0
 

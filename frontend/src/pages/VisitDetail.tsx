@@ -5,8 +5,8 @@ import { Check, Trash2, Printer, Send } from 'lucide-react'
 
 import { useAudioRecorder } from '../hooks/useAudioRecorder'
 import { useTranscriptionPolling } from '../hooks/useTranscriptionPolling'
-import { uploadAudio, getVisit, updateVisit, deleteVisit, VisitResponse } from '../api/visits'
-import { generateNote, getNote, NoteResponse, SOAPContent } from '../api/notes'
+import { uploadAudio, getVisit, updateVisit, deleteVisit, retryTranscription, VisitResponse } from '../api/visits'
+import { generateNote, getNote, syncSection, NoteResponse, SOAPContent } from '../api/notes'
 
 type Step = 0 | 1 | 2 // speak=0, summarize=1, sync=2
 
@@ -183,10 +183,13 @@ export const VisitDetail = () => {
   const [summaryEmail, setSummaryEmail] = useState('')
   const [showSendConfirm, setShowSendConfirm] = useState(false)
   const [showSendSuccess, setShowSendSuccess] = useState(false)
+  const [isSendingEmail, setIsSendingEmail] = useState(false)
+  const [sendEmailError, setSendEmailError] = useState<string | null>(null)
 
   // Upload state
   const [isUploading, setIsUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [isRetrying, setIsRetrying] = useState(false)
 
   // Inline edit state
   const [editingField, setEditingField] = useState<string | null>(null)
@@ -202,14 +205,23 @@ export const VisitDetail = () => {
   // Load visit
   useEffect(() => {
     if (!visitId) return
+    // Reset all visit-specific state when navigating to a new visit
+    setNote(null)
+    setNoteTexts({ subjective: '', objective: '', assessment: '', plan: '' })
+    setSyncedSections({ subjective: false, objective: false, assessment: false, plan: false })
+    setCurrentStep(0)
+    setPatientSummary('')
+    setSummaryEmail('')
+    setChiefComplaintDraft('')
+    setVisitDateDraft('')
     setIsLoading(true)
     getVisit(visitId)
       .then(v => {
         setVisit(v)
         setChiefComplaintDraft(v.chief_complaint || '')
         setVisitDateDraft(v.visit_date)
-        // If audio exists but not step 1, advance
-        if (v.audio_file_path || v.transcript) {
+        // Advance to summarize step only if transcription is in progress or done
+        if ((v.audio_file_path || v.transcript) && v.transcription_status !== 'failed') {
           setCurrentStep(1)
         }
       })
@@ -230,6 +242,12 @@ export const VisitDetail = () => {
           assessment: sectionToText('assessment', n.content),
           plan: sectionToText('plan', n.content),
         })
+        setSyncedSections({
+          subjective: Boolean(n.synced_sections?.subjective),
+          objective: Boolean(n.synced_sections?.objective),
+          assessment: Boolean(n.synced_sections?.assessment),
+          plan: Boolean(n.synced_sections?.plan),
+        })
       }
     } catch {
       // note doesn't exist yet
@@ -240,6 +258,21 @@ export const VisitDetail = () => {
     loadNote()
   }, [loadNote])
 
+  const handleRetryTranscription = async () => {
+    if (!visitId) return
+    setIsRetrying(true)
+    try {
+      await retryTranscription(visitId)
+      setVisit(prev => prev ? { ...prev, transcription_status: 'transcribing', transcript: null } : prev)
+      setCurrentStep(1)
+      polling.startPolling()
+    } catch {
+      // ignore — visit will still show failed state
+    } finally {
+      setIsRetrying(false)
+    }
+  }
+
   // Transcription polling
   const polling = useTranscriptionPolling({
     visitId: visit?.audio_file_path ? visitId ?? null : null,
@@ -247,6 +280,9 @@ export const VisitDetail = () => {
     intervalMs: 3000,
     onComplete: transcript => {
       setVisit(prev => prev ? { ...prev, transcript, transcription_status: 'completed' } : prev)
+    },
+    onError: () => {
+      setVisit(prev => prev ? { ...prev, transcription_status: 'failed' } : prev)
     },
   })
 
@@ -313,6 +349,15 @@ export const VisitDetail = () => {
     setSyncedSections(prev => ({ ...prev, [section]: true }))
     // Advance to step 3 on first sync
     if (currentStep < 2) setCurrentStep(2)
+    // Persist sync to database and notify sidebar to refresh
+    if (visitId && note) {
+      try {
+        await syncSection(visitId, note.id, section)
+        window.dispatchEvent(new CustomEvent('visits-updated'))
+      } catch {
+        // non-critical: local state already updated
+      }
+    }
   }
 
   const handleSaveField = async (field: 'chief_complaint' | 'visit_date') => {
@@ -462,6 +507,19 @@ export const VisitDetail = () => {
                   <div className="w-5 h-5 animate-spin rounded-full border-2 border-[#4ac6d6] border-t-transparent" />
                   <span>Transcribing...</span>
                 </div>
+              ) : visit.transcription_status === 'failed' || polling.status === 'failed' ? (
+                <div className="text-center">
+                  <p className="text-red-500 text-sm mb-3">
+                    {polling.error || 'Transcription failed. The audio may not have been captured correctly.'}
+                  </p>
+                  <button
+                    onClick={handleRetryTranscription}
+                    disabled={isRetrying}
+                    className="bg-[#4ac6d6] text-gray-900 rounded-xl px-6 py-2 text-sm hover:bg-[#3ab5c5] transition-colors disabled:opacity-50"
+                  >
+                    {isRetrying ? 'retrying...' : 'retry transcription'}
+                  </button>
+                </div>
               ) : visit.transcript || polling.transcript ? (
                 <p className="text-gray-700 text-sm">{visit.transcript || polling.transcript}</p>
               ) : uploadError ? (
@@ -519,18 +577,35 @@ export const VisitDetail = () => {
 
             {!isGeneratingNote && !note && (
               <div className="text-center py-8">
-                <p className="text-gray-500 italic mb-4">
-                  {visit.transcription_status === 'completed'
-                    ? 'Ready to generate your SOAP note.'
-                    : 'Waiting for transcription to complete...'}
-                </p>
-                {visit.transcription_status === 'completed' && (
-                  <button
-                    onClick={handleGenerateNote}
-                    className="bg-[#4ac6d6] text-gray-900 rounded-xl px-8 py-3 hover:bg-[#3ab5c5] transition-colors"
-                  >
-                    Generate SOAP Note
-                  </button>
+                {visit.transcription_status === 'failed' ? (
+                  <>
+                    <p className="text-red-500 italic mb-4">
+                      {polling.error || 'Transcription failed. The audio may not have been captured correctly.'}
+                    </p>
+                    <button
+                      onClick={handleRetryTranscription}
+                      disabled={isRetrying}
+                      className="bg-[#4ac6d6] text-gray-900 rounded-xl px-8 py-3 hover:bg-[#3ab5c5] transition-colors disabled:opacity-50"
+                    >
+                      {isRetrying ? 'retrying...' : 'retry transcription'}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-gray-500 italic mb-4">
+                      {visit.transcription_status === 'completed'
+                        ? 'Ready to generate your SOAP note.'
+                        : 'Waiting for transcription to complete...'}
+                    </p>
+                    {visit.transcription_status === 'completed' && (
+                      <button
+                        onClick={handleGenerateNote}
+                        className="bg-[#4ac6d6] text-gray-900 rounded-xl px-8 py-3 hover:bg-[#3ab5c5] transition-colors"
+                      >
+                        Generate SOAP Note
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
             )}
@@ -586,11 +661,14 @@ export const VisitDetail = () => {
                   className="w-full resize-y text-sm text-gray-700 focus:outline-none bg-transparent mb-4 placeholder:italic placeholder:text-gray-400"
                   placeholder="Patient-friendly summary will appear here"
                 />
+                {sendEmailError && (
+                  <p className="text-sm text-red-500 mb-2">{sendEmailError}</p>
+                )}
                 <div className="flex items-center gap-3">
                   <input
                     type="email"
                     value={summaryEmail}
-                    onChange={e => setSummaryEmail(e.target.value)}
+                    onChange={e => { setSummaryEmail(e.target.value); if (sendEmailError) setSendEmailError(null) }}
                     placeholder="patient@email.com"
                     className="flex-1 border border-gray-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-[#4ac6d6] italic text-gray-600 placeholder:text-gray-400"
                   />
@@ -602,7 +680,18 @@ export const VisitDetail = () => {
                     <Printer size={20} />
                   </button>
                   <button
-                    onClick={() => setShowSendConfirm(true)}
+                    onClick={() => {
+                      if (!summaryEmail.trim()) {
+                        setSendEmailError('Please enter a patient email address.')
+                        return
+                      }
+                      if (!patientSummary.trim()) {
+                        setSendEmailError('Please enter a summary before sending.')
+                        return
+                      }
+                      setSendEmailError(null)
+                      setShowSendConfirm(true)
+                    }}
                     className="p-2 text-gray-500 hover:text-[#4ac6d6] transition-colors"
                     title="Send to patient"
                   >
@@ -636,31 +725,47 @@ export const VisitDetail = () => {
               <p className="text-gray-600 mb-2">
                 Are you sure you want to send the patient summary to:
               </p>
-              <p className="text-[#4ac6d6] font-medium mb-6">{summaryEmail || 'No email provided'}</p>
+              <p className="text-[#4ac6d6] font-medium mb-6">{summaryEmail}</p>
+              {sendEmailError && (
+                <p className="text-sm text-red-500 mb-4">{sendEmailError}</p>
+              )}
               <div className="flex gap-3">
                 <button
-                  onClick={() => setShowSendConfirm(false)}
-                  className="flex-1 border-2 border-[#4ac6d6] text-gray-900 rounded-xl py-3 hover:bg-gray-50 transition-colors"
+                  onClick={() => { setShowSendConfirm(false); setSendEmailError(null) }}
+                  disabled={isSendingEmail}
+                  className="flex-1 border-2 border-[#4ac6d6] text-gray-900 rounded-xl py-3 hover:bg-gray-50 transition-colors disabled:opacity-50"
                 >
                   cancel
                 </button>
                 <button
+                  disabled={isSendingEmail}
                   onClick={async () => {
+                    setIsSendingEmail(true)
+                    setSendEmailError(null)
                     try {
                       const token = localStorage.getItem('token')
-                      await fetch(`/api/v1/visits/${visitId}/summary/send`, {
+                      const res = await fetch(`/api/v1/visits/${visitId}/summary/send`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                         body: JSON.stringify({ email: summaryEmail, summary: patientSummary }),
                       })
-                    } catch (e) { /* still show success */ }
-                    setShowSendConfirm(false)
-                    setShowSendSuccess(true)
-                    setTimeout(() => setShowSendSuccess(false), 3000)
+                      if (!res.ok) {
+                        const data = await res.json().catch(() => ({}))
+                        setSendEmailError(data?.detail || 'Failed to send email. Please try again.')
+                        return
+                      }
+                      setShowSendConfirm(false)
+                      setShowSendSuccess(true)
+                      setTimeout(() => setShowSendSuccess(false), 3000)
+                    } catch {
+                      setSendEmailError('Failed to send email. Please try again.')
+                    } finally {
+                      setIsSendingEmail(false)
+                    }
                   }}
-                  className="flex-1 bg-[#4ac6d6] text-gray-900 rounded-xl py-3 hover:bg-[#3ab5c5] transition-colors font-medium"
+                  className="flex-1 bg-[#4ac6d6] text-gray-900 rounded-xl py-3 hover:bg-[#3ab5c5] transition-colors font-medium disabled:opacity-50"
                 >
-                  send summary
+                  {isSendingEmail ? 'sending...' : 'send summary'}
                 </button>
               </div>
             </motion.div>

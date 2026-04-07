@@ -56,6 +56,7 @@ class VisitResponse(BaseModel):
     transcription_status: str
     is_live_transcription: bool
     transcription_session_id: uuid.UUID | None
+    all_synced: bool = False
     created_at: datetime
     updated_at: datetime
 

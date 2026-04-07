@@ -21,6 +21,8 @@ from app.schemas.note import (
     NoteExportResponse,
     NoteResponse,
     NoteUpdateRequest,
+    SyncSectionRequest,
+    SyncSectionResponse,
 )
 from app.services.note_generation import (
     NoteGenerationError,
@@ -380,3 +382,58 @@ async def export_note(
         format=request.format,
         content=content,
     )
+
+
+_SOAP_SECTIONS = {"subjective", "objective", "assessment", "plan"}
+
+
+@router.post(
+    "/{visit_id}/notes/{note_id}/sync-section",
+    response_model=SyncSectionResponse,
+    summary="Mark a SOAP section as synced",
+    description="Persist that a provider has copied a SOAP section to their EHR.",
+)
+async def sync_section(
+    visit_id: uuid.UUID,
+    note_id: uuid.UUID,
+    request: SyncSectionRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> SyncSectionResponse:
+    """Mark a SOAP section as synced and return overall sync status."""
+    # Verify visit ownership
+    visit_result = await db.execute(
+        select(Visit).where(
+            Visit.id == visit_id,
+            Visit.user_id == current_user.id,
+        )
+    )
+    if visit_result.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Visit not found",
+        )
+
+    # Get note
+    result = await db.execute(
+        select(Note).where(
+            Note.id == note_id,
+            Note.visit_id == visit_id,
+        )
+    )
+    note = result.scalar_one_or_none()
+    if note is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Note not found",
+        )
+
+    updated = dict(note.synced_sections or {})
+    updated[request.section] = True
+    note.synced_sections = updated
+
+    await db.flush()
+    await db.refresh(note)
+
+    all_synced = all(note.synced_sections.get(s) for s in _SOAP_SECTIONS)
+    return SyncSectionResponse(synced_sections=note.synced_sections, all_synced=all_synced)

@@ -60,8 +60,18 @@ export interface NoteResponse {
   content: SOAPContent
   note_type: string
   status: 'draft' | 'reviewed' | 'finalized'
+  synced_sections: Record<string, boolean>
+  all_synced: boolean
   created_at: string
   updated_at: string
+}
+
+/**
+ * Sync section response.
+ */
+export interface SyncSectionResponse {
+  synced_sections: Record<string, boolean>
+  all_synced: boolean
 }
 
 /**
@@ -168,6 +178,26 @@ export const deleteNote = async (
   noteId: string
 ): Promise<void> => {
   await apiClient.delete(`/visits/${visitId}/notes/${noteId}`)
+}
+
+/**
+ * Mark a SOAP section as synced (copied to EHR).
+ *
+ * @param visitId - Visit ID
+ * @param noteId - Note ID
+ * @param section - SOAP section name
+ * @returns Sync status response
+ */
+export const syncSection = async (
+  visitId: string,
+  noteId: string,
+  section: string
+): Promise<SyncSectionResponse> => {
+  const response = await apiClient.post<SyncSectionResponse>(
+    `/visits/${visitId}/notes/${noteId}/sync-section`,
+    { section }
+  )
+  return response.data
 }
 
 /**

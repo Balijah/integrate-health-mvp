@@ -62,6 +62,12 @@ export const Layout = ({
     getVisits(50, 0).then(res => setVisits(res.items)).catch(() => {})
   }, [location.pathname])
 
+  useEffect(() => {
+    const handler = () => getVisits(50, 0).then(res => setVisits(res.items)).catch(() => {})
+    window.addEventListener('visits-updated', handler)
+    return () => window.removeEventListener('visits-updated', handler)
+  }, [])
+
   const filteredVisits = visits.filter(v =>
     v.patient_ref.toLowerCase().includes(patientSearch.toLowerCase())
   )
@@ -206,7 +212,7 @@ export const Layout = ({
                           onClick={() => navigate(`/visits/${visit.id}`)}
                           className="w-full flex items-center gap-2 px-4 py-2 hover:bg-gray-50 text-left"
                         >
-                          {visit.transcription_status !== 'completed' && (
+                          {!visit.all_synced && (
                             <span className="w-2 h-2 bg-[#4ac6d6] rounded-full flex-shrink-0" />
                           )}
                           <div className="min-w-0 flex-1">

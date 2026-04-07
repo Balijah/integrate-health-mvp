@@ -16,6 +16,7 @@ import {
   UserResponse,
 } from '../api/auth'
 import { getErrorMessage } from '../api/client'
+import axios from 'axios'
 
 /**
  * Authentication state interface.
@@ -95,7 +96,8 @@ export const useAuthStore = create<AuthStore>()(
 
           return true
         } catch (error) {
-          const message = getErrorMessage(error)
+          const isUnauthorized = axios.isAxiosError(error) && error.response?.status === 401
+          const message = isUnauthorized ? 'Invalid email or password.' : getErrorMessage(error)
           set({
             isLoading: false,
             error: message,

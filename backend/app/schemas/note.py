@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 # SOAP Note Content Schemas
@@ -125,10 +125,18 @@ class NoteResponse(BaseModel):
     content: dict[str, Any]
     note_type: str
     status: str
+    synced_sections: dict = Field(default_factory=dict)
+    all_synced: bool = False
     created_at: datetime
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="after")
+    def compute_all_synced(self) -> "NoteResponse":
+        sections = {"subjective", "objective", "assessment", "plan"}
+        self.all_synced = all(self.synced_sections.get(s) for s in sections)
+        return self
 
 
 class NoteExportResponse(BaseModel):
@@ -147,3 +155,20 @@ class GenerateNoteResponse(BaseModel):
     visit_id: uuid.UUID
     status: str
     message: str
+
+
+class SyncSectionRequest(BaseModel):
+    """Request schema for syncing a SOAP section."""
+
+    section: str = Field(
+        ...,
+        pattern="^(subjective|objective|assessment|plan)$",
+        description="SOAP section to mark as synced",
+    )
+
+
+class SyncSectionResponse(BaseModel):
+    """Response schema for sync-section endpoint."""
+
+    synced_sections: dict
+    all_synced: bool

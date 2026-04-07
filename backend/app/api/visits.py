@@ -9,11 +9,15 @@ import logging
 import uuid
 from pathlib import Path
 
+import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile, status
+from pydantic import BaseModel, EmailStr
 from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession
 from app.config import get_settings
+from app.models.note import Note
 from app.models.visit import Visit
 from app.schemas.visit import (
     AudioUploadResponse,
@@ -112,8 +116,26 @@ async def list_visits(
     result = await db.execute(visits_query)
     visits = result.scalars().all()
 
+    # Bulk-fetch notes to compute all_synced per visit
+    visit_ids = [v.id for v in visits]
+    _SOAP_SECTIONS = {"subjective", "objective", "assessment", "plan"}
+    synced_map: dict = {}
+    if visit_ids:
+        notes_result = await db.execute(
+            select(Note.visit_id, Note.synced_sections).where(Note.visit_id.in_(visit_ids))
+        )
+        for row in notes_result:
+            synced_map[row[0]] = row[1] or {}
+
+    items = []
+    for v in visits:
+        vr = VisitResponse.model_validate(v)
+        synced = synced_map.get(v.id, {})
+        all_synced = all(synced.get(s) for s in _SOAP_SECTIONS)
+        items.append(vr.model_copy(update={"all_synced": all_synced}))
+
     return VisitListResponse(
-        items=[VisitResponse.model_validate(v) for v in visits],
+        items=items,
         total=total,
         limit=limit,
         offset=offset,
@@ -159,7 +181,14 @@ async def get_visit(
             detail="Visit not found",
         )
 
-    return VisitResponse.model_validate(visit)
+    _SOAP_SECTIONS = {"subjective", "objective", "assessment", "plan"}
+    note_result = await db.execute(
+        select(Note.synced_sections).where(Note.visit_id == visit_id)
+    )
+    synced = note_result.scalar_one_or_none() or {}
+    all_synced = all(synced.get(s) for s in _SOAP_SECTIONS)
+
+    return VisitResponse.model_validate(visit).model_copy(update={"all_synced": all_synced})
 
 
 @router.patch(
@@ -372,3 +401,87 @@ async def upload_audio(
         file_size_bytes=len(content),
         mime_type=mime_type,
     )
+
+
+class SendSummaryRequest(BaseModel):
+    """Request schema for sending a patient summary email."""
+
+    email: EmailStr
+    summary: str
+
+
+@router.post(
+    "/{visit_id}/summary/send",
+    summary="Send patient summary email",
+    description="Send the patient-friendly summary to the provided email address via SES.",
+)
+async def send_summary(
+    visit_id: uuid.UUID,
+    request: SendSummaryRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    """
+    Send a patient summary email.
+
+    Args:
+        visit_id: Visit UUID
+        request: Email address and summary text
+        current_user: Authenticated user
+        db: Database session
+
+    Returns:
+        dict: Confirmation message
+    """
+    if not request.summary.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Summary cannot be empty.",
+        )
+
+    # Verify visit belongs to user
+    result = await db.execute(
+        select(Visit).where(
+            Visit.id == visit_id,
+            Visit.user_id == current_user.id,
+        )
+    )
+    visit = result.scalar_one_or_none()
+    if visit is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Visit not found",
+        )
+
+    try:
+        ses_client = boto3.client("ses", region_name="us-east-1")
+        ses_client.send_email(
+            Source="burhankhan@integratehealth.ai",
+            Destination={"ToAddresses": [str(request.email)]},
+            Message={
+                "Subject": {"Data": f"Your Visit Summary — {visit.patient_ref}"},
+                "Body": {
+                    "Text": {"Data": request.summary},
+                },
+            },
+        )
+    except ClientError as e:
+        error_code = e.response["Error"]["Code"]
+        if error_code == "MessageRejected":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email address is not verified. Please contact support.",
+            )
+        logger.error(f"SES send failed for visit {visit_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to send email. Please try again later.",
+        )
+    except (BotoCoreError, Exception) as e:
+        logger.error(f"SES error for visit {visit_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to send email. Please try again later.",
+        )
+
+    return {"message": "Summary sent successfully"}

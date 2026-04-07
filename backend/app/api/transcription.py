@@ -142,8 +142,20 @@ async def _process_transcription_async(visit_id: uuid.UUID, db_url: str) -> None
             else:
                 transcription_result = transcribe_audio_file(audio_path)
 
+            # Validate transcript has content before marking completed
+            raw_transcript = transcription_result.get("transcript", "")
+            if not raw_transcript.strip():
+                logger.error(
+                    f"Transcription for visit {visit_id} returned empty transcript. "
+                    f"Audio duration: {transcription_result.get('metadata', {}).get('duration_seconds')}s"
+                )
+                visit.transcription_status = "failed"
+                visit.transcription_error = "Transcription returned no text. Please try again — if this persists, the audio may not have been captured correctly."
+                await db.commit()
+                return
+
             # Update visit with transcript and Deepgram metadata
-            visit.transcript = transcription_result["transcript"]
+            visit.transcript = raw_transcript
             visit.transcription_status = "completed"
             visit.transcription_error = None
 

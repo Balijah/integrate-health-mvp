@@ -28,6 +28,8 @@ export const Login = () => {
     const success = await login({ email, password })
     if (success) {
       navigate('/')
+    } else {
+      setPassword('')
     }
   }
 
@@ -67,7 +69,7 @@ export const Login = () => {
                 autoComplete="email"
                 required
                 value={email}
-                onChange={e => setEmail(e.target.value)}
+                onChange={e => { setEmail(e.target.value); if (error) clearError() }}
                 className="w-full border-2 border-[#4ac6d6] rounded-xl px-4 py-3 text-gray-900 placeholder:italic placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#4ac6d6]/30"
                 placeholder="you@example.com"
               />
@@ -84,7 +86,7 @@ export const Login = () => {
                   autoComplete="current-password"
                   required
                   value={password}
-                  onChange={e => setPassword(e.target.value)}
+                  onChange={e => { setPassword(e.target.value); if (error) clearError() }}
                   className="w-full border-2 border-[#4ac6d6] rounded-xl px-4 py-3 pr-12 text-gray-900 placeholder:italic placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#4ac6d6]/30"
                   placeholder="Enter your password"
                 />
@@ -99,13 +101,9 @@ export const Login = () => {
             </div>
 
             <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={() => window.location.href = '/forgot-password'}
-                className="text-sm text-[#4ac6d6] hover:text-[#3ab5c5]"
-              >
+              <Link to="/forgot-password" className="text-sm text-[#4ac6d6] hover:text-[#3ab5c5]">
                 forgot password?
-              </button>
+              </Link>
             </div>
 
             <button
