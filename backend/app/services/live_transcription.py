@@ -1,9 +1,7 @@
 """
 Live Transcription service.
 
-Note: Live transcription is currently disabled in AWS deployment.
-The application uses batch transcription via Whisper service instead.
-This module provides stub implementations to maintain API compatibility.
+Manages live transcription sessions using Deepgram's streaming API.
 """
 
 import logging
@@ -80,18 +78,11 @@ class LiveTranscriptionSession:
 
 
 class LiveTranscriptionService:
-    """
-    Manage live transcription sessions.
-
-    Note: Live transcription is disabled in AWS deployment.
-    Use batch transcription via /visits/{id}/transcribe endpoint instead.
-    """
+    """Manage live transcription sessions via Deepgram streaming API."""
 
     def __init__(self):
         self.active_sessions: dict[str, LiveTranscriptionSession] = {}
         self._lock = threading.Lock()
-        self._disabled = True  # Live transcription disabled in AWS mode
-        logger.warning("Live transcription is disabled in AWS deployment mode")
 
     def start_session(
         self,
@@ -101,10 +92,7 @@ class LiveTranscriptionService:
         encoding: str = "linear16",
     ) -> LiveTranscriptionSession:
         """
-        Start a live transcription session.
-
-        Note: Live transcription is currently disabled in AWS deployment.
-        Use batch transcription via the /visits/{id}/transcribe endpoint instead.
+        Start a live transcription session connected to Deepgram.
 
         Args:
             session_id: Unique session identifier.
@@ -112,13 +100,94 @@ class LiveTranscriptionService:
             sample_rate: Audio sample rate (default 16000).
             encoding: Audio encoding format (default linear16).
 
+        Returns:
+            LiveTranscriptionSession: The started session.
+
         Raises:
-            LiveTranscriptionError: Always raised as live transcription is disabled.
+            LiveTranscriptionError: If Deepgram connection fails.
         """
-        raise LiveTranscriptionError(
-            "Live transcription is not available in AWS deployment. "
-            "Please use batch transcription: upload audio and call POST /visits/{id}/transcribe"
+        from deepgram import DeepgramClient, LiveOptions, LiveTranscriptionEvents
+
+        settings = get_settings()
+
+        if not settings.deepgram_api_key:
+            raise LiveTranscriptionError("Deepgram API key not configured.")
+
+        session = LiveTranscriptionSession(session_id=session_id, visit_id=visit_id)
+        session.status = "active"
+        session.started_at = datetime.utcnow()
+
+        deepgram = DeepgramClient(settings.deepgram_api_key)
+        dg_connection = deepgram.listen.websocket.v("1")
+
+        def on_transcript(self_dg, result, **kwargs):
+            try:
+                alternatives = result.channel.alternatives
+                if not alternatives:
+                    return
+                alt = alternatives[0]
+                if not alt.transcript:
+                    return
+
+                words = alt.words or []
+                is_final = getattr(result, "is_final", False)
+
+                if words:
+                    counts: dict[int, int] = {}
+                    for w in words:
+                        spk = int(getattr(w, "speaker", 0) or 0)
+                        counts[spk] = counts.get(spk, 0) + 1
+                    dominant = max(counts, key=counts.get)
+                    speaker_label = self._identify_speaker(dominant)
+                else:
+                    speaker_label = "provider"
+
+                confidence = round(float(getattr(alt, "confidence", 0.0) or 0.0), 4)
+
+                session.add_transcript({
+                    "type": "transcript",
+                    "speaker": speaker_label,
+                    "text": alt.transcript,
+                    "timestamp": int(datetime.utcnow().timestamp() * 1000),
+                    "is_final": is_final,
+                    "confidence": confidence,
+                })
+            except Exception as e:
+                logger.error(f"Error in transcript callback for session {session_id}: {e}")
+
+        def on_error(self_dg, error, **kwargs):
+            logger.error(f"Deepgram streaming error for session {session_id}: {error}")
+            session.message_queue.put({"type": "error", "message": str(error)})
+
+        def on_close(self_dg, close, **kwargs):
+            logger.info(f"Deepgram connection closed for session {session_id}")
+
+        dg_connection.on(LiveTranscriptionEvents.Transcript, on_transcript)
+        dg_connection.on(LiveTranscriptionEvents.Error, on_error)
+        dg_connection.on(LiveTranscriptionEvents.Close, on_close)
+
+        options = LiveOptions(
+            model=settings.deepgram_model,
+            language=settings.deepgram_language,
+            smart_format=True,
+            punctuate=True,
+            diarize=True,
+            encoding=encoding,
+            sample_rate=sample_rate,
+            channels=1,
+            interim_results=True,
         )
+
+        if not dg_connection.start(options):
+            raise LiveTranscriptionError("Failed to open Deepgram streaming connection.")
+
+        session.connection = dg_connection
+
+        with self._lock:
+            self.active_sessions[session_id] = session
+
+        logger.info(f"Live transcription session started: {session_id} (visit {visit_id})")
+        return session
 
     def send_audio_chunk(self, session_id: str, audio_data: bytes) -> bool:
         """
@@ -256,9 +325,9 @@ class LiveTranscriptionService:
             "transcript_segments": len(session.transcript_buffer),
         }
 
-    def _identify_speaker(self, result) -> str:
-        """Identify speaker from diarization data (stub - not implemented in AWS mode)."""
-        return "provider"
+    def _identify_speaker(self, speaker_index: int) -> str:
+        """Map Deepgram speaker index to clinical label. Index 0 = first to speak = Provider."""
+        return "provider" if speaker_index == 0 else "patient"
 
 
 # Global service instance

@@ -134,6 +134,7 @@ export const getLiveTranscriptionStatus = async (
 export const getWebSocketUrl = (sessionId: string): string => {
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
   const wsProtocol = apiUrl.startsWith('https') ? 'wss' : 'ws'
-  const wsHost = apiUrl.replace(/^https?:\/\//, '')
-  return `${wsProtocol}://${wsHost}/ws/transcription/${sessionId}`
+  // Strip path (e.g. /api/v1) — WebSocket lives at the root, not under /api/v1
+  const host = new URL(apiUrl).host
+  return `${wsProtocol}://${host}/ws/transcription/${sessionId}`
 }

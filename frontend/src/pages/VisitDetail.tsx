@@ -3,9 +3,9 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Check, Trash2, Printer, Send } from 'lucide-react'
 
-import { useAudioRecorder } from '../hooks/useAudioRecorder'
 import { useTranscriptionPolling } from '../hooks/useTranscriptionPolling'
-import { uploadAudio, getVisit, updateVisit, deleteVisit, retryTranscription, VisitResponse } from '../api/visits'
+import { getVisit, updateVisit, deleteVisit, retryTranscription, VisitResponse } from '../api/visits'
+import { LiveRecorder } from '../components/LiveRecorder/LiveRecorder'
 import { generateNote, getNote, syncSection, NoteResponse, SOAPContent } from '../api/notes'
 
 type Step = 0 | 1 | 2 // speak=0, summarize=1, sync=2
@@ -187,8 +187,6 @@ export const VisitDetail = () => {
   const [sendEmailError, setSendEmailError] = useState<string | null>(null)
 
   // Upload state
-  const [isUploading, setIsUploading] = useState(false)
-  const [uploadError, setUploadError] = useState<string | null>(null)
   const [isRetrying, setIsRetrying] = useState(false)
 
   // Inline edit state
@@ -197,10 +195,6 @@ export const VisitDetail = () => {
   const [visitDateDraft, setVisitDateDraft] = useState('')
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
-
-  // Recording
-  const recorder = useAudioRecorder()
-  const isRecording = recorder.state === 'recording'
 
   // Load visit
   useEffect(() => {
@@ -293,34 +287,9 @@ export const VisitDetail = () => {
     }
   }, [currentStep, visit?.transcription_status, visit?.transcript, note])
 
-  // Upload when recorder transitions to stopped state with a blob
-  const [pendingUpload, setPendingUpload] = useState(false)
-
-  useEffect(() => {
-    if (recorder.state === 'stopped' && recorder.audioBlob && pendingUpload && visitId) {
-      const blob = recorder.audioBlob
-      setPendingUpload(false)
-      setIsUploading(true)
-      setUploadError(null)
-      uploadAudio(visitId, blob)
-        .then(() => getVisit(visitId))
-        .then(updated => {
-          setVisit(updated)
-          polling.startPolling()
-        })
-        .catch(() => setUploadError('Failed to upload audio. Please try again.'))
-        .finally(() => setIsUploading(false))
-    }
-  }, [recorder.state, recorder.audioBlob, pendingUpload, visitId])
-
-  const handleStartRecording = async () => {
-    await recorder.startRecording()
-  }
-
-  const handleStopRecording = () => {
-    setPendingUpload(true)
-    recorder.stopRecording()
-  }
+  const handleLiveComplete = useCallback((transcript: string) => {
+    setVisit(prev => prev ? { ...prev, transcript, transcription_status: 'completed' } : prev)
+  }, [])
 
   const handleGenerateNote = async () => {
     if (!visitId) return
@@ -486,65 +455,26 @@ export const VisitDetail = () => {
             exit={{ opacity: 0, y: -10 }}
             className="space-y-4"
           >
-            {/* Transcript display */}
-            <div className="bg-white border border-[#4ac6d6] rounded-2xl p-6 min-h-[120px] flex items-center justify-center">
-              {isRecording ? (
-                <div className="flex items-center gap-3 text-gray-600">
-                  <motion.div
-                    animate={{ scale: [1, 1.2, 1] }}
-                    transition={{ duration: 1, repeat: Infinity }}
-                    className="w-3 h-3 bg-red-500 rounded-full"
-                  />
-                  <span>Recording in progress... {recorder.duration}s</span>
-                </div>
-              ) : isUploading ? (
-                <div className="flex items-center gap-3 text-gray-600">
-                  <div className="w-5 h-5 animate-spin rounded-full border-2 border-[#4ac6d6] border-t-transparent" />
-                  <span>Uploading audio...</span>
-                </div>
-              ) : polling.isPolling || visit.transcription_status === 'transcribing' ? (
-                <div className="flex items-center gap-3 text-gray-600">
-                  <div className="w-5 h-5 animate-spin rounded-full border-2 border-[#4ac6d6] border-t-transparent" />
-                  <span>Transcribing...</span>
-                </div>
-              ) : visit.transcription_status === 'failed' || polling.status === 'failed' ? (
-                <div className="text-center">
-                  <p className="text-red-500 text-sm mb-3">
-                    {polling.error || 'Transcription failed. The audio may not have been captured correctly.'}
-                  </p>
-                  <button
-                    onClick={handleRetryTranscription}
-                    disabled={isRetrying}
-                    className="bg-[#4ac6d6] text-gray-900 rounded-xl px-6 py-2 text-sm hover:bg-[#3ab5c5] transition-colors disabled:opacity-50"
-                  >
-                    {isRetrying ? 'retrying...' : 'retry transcription'}
-                  </button>
-                </div>
-              ) : visit.transcript || polling.transcript ? (
-                <p className="text-gray-700 text-sm">{visit.transcript || polling.transcript}</p>
-              ) : uploadError ? (
-                <p className="text-red-500 text-sm">{uploadError}</p>
-              ) : (
-                <span className="text-gray-400 italic text-sm">Transcript will appear here after recording</span>
-              )}
-            </div>
+            {/* Live recorder — handles its own transcript display, controls, and status */}
+            <LiveRecorder
+              visitId={visitId!}
+              onComplete={handleLiveComplete}
+            />
 
-            {/* Record button */}
-            <motion.button
-              whileHover={{ scale: 1.01 }}
-              whileTap={{ scale: 0.99 }}
-              onClick={isRecording ? handleStopRecording : handleStartRecording}
-              disabled={isUploading || polling.isPolling}
-              className="relative w-full h-16 rounded-xl overflow-hidden disabled:opacity-50"
-              style={{ background: isRecording ? '#ef4444' : 'linear-gradient(135deg, #4ac6d6, #2a8fa0)' }}
-            >
-              <span className="text-white font-normal drop-shadow-md">
-                {isRecording ? 'stop recording' : 'start recording'}
-              </span>
-            </motion.button>
-
-            {recorder.error && (
-              <p className="text-sm text-red-500 text-center">{recorder.error}</p>
+            {/* Batch retry fallback — only shown when visit has audio but transcription failed */}
+            {(visit.transcription_status === 'failed' || polling.status === 'failed') && visit.audio_file_path && (
+              <div className="text-center">
+                <p className="text-red-500 text-sm mb-3 italic">
+                  {polling.error || 'Transcription returned no text. Please try again — if this persists, the audio may not have been captured correctly.'}
+                </p>
+                <button
+                  onClick={handleRetryTranscription}
+                  disabled={isRetrying}
+                  className="bg-[#4ac6d6] text-gray-900 rounded-xl px-6 py-2 text-sm hover:bg-[#3ab5c5] transition-colors disabled:opacity-50"
+                >
+                  {isRetrying ? 'retrying...' : 'retry transcription'}
+                </button>
+              </div>
             )}
 
             {/* Advance button when transcript is ready */}
