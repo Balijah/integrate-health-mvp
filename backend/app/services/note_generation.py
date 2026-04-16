@@ -24,23 +24,18 @@ class NoteGenerationError(Exception):
 
 
 # System prompt for functional medicine SOAP note generation
-SYSTEM_PROMPT = """You are an expert medical documentation assistant specializing in functional medicine. Your role is to generate comprehensive SOAP notes from patient visit transcripts.
+SYSTEM_PROMPT = """You are an expert medical documentation assistant specializing in functional medicine. Generate comprehensive SOAP notes from patient visit transcripts.
 
-Functional medicine focuses on identifying and addressing root causes of disease through a systems-oriented approach. When generating notes, consider:
-- Root cause analysis rather than just symptom management
-- Interconnections between body systems
-- Lifestyle factors (diet, sleep, stress, exercise)
-- Environmental factors and toxin exposure
-- Nutritional deficiencies and supplementation
-- Gut health and microbiome considerations
-- Hormonal balance
-- Inflammation markers
+CRITICAL RULES:
+- Only include information explicitly mentioned in the transcript or contextual notes
+- Never invent, infer, or hallucinate clinical details not present in the source material
+- Omit any JSON key entirely if the information was not mentioned — do not use empty strings or empty arrays
+- Always use the patient's preferred gender pronouns throughout
+- For all dosages and frequencies, always use numerals (e.g., "10 mg twice daily" not "ten milligrams two times a day")
+- For supplements, always include the exact number of capsules or scoops discussed
+- The plan section must be a comprehensive summary of ALL interventions discussed — systematically review every issue in clinical_discussion and ensure nothing is missed
 
-Generate structured SOAP notes in the exact JSON format specified. Be thorough but concise. Extract all relevant clinical information from the transcript.
-
-If information is not mentioned in the transcript, use empty strings or empty arrays for those fields - do not make up information.
-
-Important: Your response must be valid JSON only, with no additional text before or after."""
+Respond with ONLY valid JSON. No text before or after."""
 
 USER_PROMPT_TEMPLATE = """Generate a SOAP note from the following patient visit transcript.
 
@@ -51,40 +46,141 @@ TRANSCRIPT:
 
 Generate the SOAP note in this exact JSON structure:
 {{
-  "subjective": {{
-    "chief_complaint": "Main reason for visit",
-    "history_of_present_illness": "Detailed history of current condition",
-    "review_of_systems": "Systems review findings",
-    "past_medical_history": "Relevant past medical history",
-    "medications": ["List of current medications"],
-    "supplements": ["List of current supplements"],
-    "allergies": ["Known allergies"],
-    "social_history": "Lifestyle factors, occupation, habits",
-    "family_history": "Relevant family medical history"
-  }},
-  "objective": {{
-    "vitals": {{
-      "blood_pressure": "BP reading if mentioned",
-      "heart_rate": "HR if mentioned",
-      "temperature": "Temp if mentioned",
-      "weight": "Weight if mentioned"
-    }},
-    "physical_exam": "Physical examination findings",
-    "lab_results": "Any lab results discussed"
-  }},
-  "assessment": {{
-    "diagnoses": ["Primary and secondary diagnoses/impressions"],
-    "clinical_reasoning": "Clinical reasoning and root cause analysis"
-  }},
-  "plan": {{
-    "treatment_plan": "Overall treatment approach",
-    "medications_prescribed": ["New medications prescribed"],
-    "supplements_recommended": ["Supplements recommended"],
-    "lifestyle_recommendations": "Diet, exercise, sleep, stress management recommendations",
-    "lab_orders": ["Labs ordered"],
-    "follow_up": "Follow-up plan",
-    "patient_education": "Education provided to patient"
-  }}
+  "patient": {
+    "name": "Patient name if mentioned",
+    "age": "Age if mentioned",
+    "preferred_pronouns": "he/him | she/her | they/them — infer from transcript if not stated"
+  },
+  "chief_complaints": [
+    "Brief description of chief complaint 1",
+    "Brief description of chief complaint 2"
+  ],
+  "subjective": {
+    "reason_for_visit": "Why the patient came in today including requests, symptoms, relevant updates",
+    "current_problem_list": [
+      "Active problem 1",
+      "Active problem 2"
+    ],
+    "symptom_detail": {
+      "duration_timing": "When symptoms started and timing patterns",
+      "location_quality_severity": "Where, what kind, how bad",
+      "aggravating_alleviating_factors": "What makes it worse or better including self-treatment attempts",
+      "progression": "How symptoms have changed or evolved over time",
+      "previous_episodes": "Past occurrences, how managed, outcomes",
+      "impact_on_daily_life": "How symptoms affect daily life, work, activities",
+      "associated_symptoms": "Other focal or systemic symptoms accompanying chief complaint"
+    },
+    "pertinent_side_conversation": "Psychological or emotional context mentioned that may be clinically relevant"
+  },
+  "past_medical_history": {
+    "allergies": [
+      "Allergy 1",
+      "Allergy 2"
+    ],
+    "medications": [
+      { "name": "Medication name", "dose": "10 mg", "frequency": "twice daily" }
+    ],
+    "supplements": [
+      { "name": "Supplement name", "dose": "500 mg", "frequency": "once daily", "amount": "2 capsules" }
+    ],
+    "procedures_surgeries_hospitalizations": [
+      "Procedure or surgery 1",
+      "Hospitalization 1"
+    ],
+    "family_history": [
+      "Relevant family history item 1"
+    ],
+    "social_history": [
+      "Relevant social history item 1"
+    ],
+    "healthcare_management": {
+      "last_wellness_visit": "Date if mentioned",
+      "last_pap": "Date and results if mentioned",
+      "colonoscopy": "Date and follow-up if mentioned",
+      "mammogram": "Date and results if mentioned",
+      "skin_cancer_screening": "Date if mentioned",
+      "hcv_status": "Reactivity status if mentioned"
+    }
+  },
+  "review_of_systems": [
+    { "system": "System name", "findings": "Relevant symptoms or pertinent negatives" }
+  ],
+  "objective": {
+    "vitals": {
+      "blood_pressure": "Reading if mentioned",
+      "heart_rate": "Reading if mentioned",
+      "temperature": "Reading if mentioned",
+      "weight": "Reading if mentioned"
+    },
+    "physical_exam": "Examination findings if documented",
+    "labs_reviewed": [
+      "Lab result 1 with value and reference range if mentioned"
+    ],
+    "imaging_reviewed": [
+      "Imaging result 1"
+    ],
+    "previous_pertinent_labs": [
+      "Previous lab result 1"
+    ]
+  },
+  "assessment": {
+    "diagnoses": [
+      "Active diagnosis 1",
+      "Suspected diagnosis or symptom complex 1",
+      "All issues, problems, or requests discussed"
+    ],
+    "clinical_discussion": [
+      {
+        "issue": "Issue or condition name only",
+        "assessment": "Likely diagnosis — condition name only",
+        "differential": "Differential diagnoses if explicitly mentioned",
+        "investigations_planned": [
+          "Planned test or investigation 1"
+        ],
+        "treatment_planned": "Treatment approach discussed",
+        "referrals": [
+          "Referral 1 if mentioned"
+        ]
+      }
+    ]
+  },
+  "plan": {
+    "nutrition_lifestyle": [
+      "Specific nutrition or lifestyle intervention discussed"
+    ],
+    "supplements": {
+      "add": [
+        { "name": "Supplement name", "dose": "500 mg", "frequency": "twice daily", "amount": "2 capsules" }
+      ],
+      "continue": [
+        { "name": "Supplement name", "dose": "500 mg", "frequency": "once daily", "amount": "1 capsule" }
+      ],
+      "discontinue": [
+        { "name": "Supplement name", "dose": "500 mg", "frequency": "once daily" }
+      ]
+    },
+    "prescriptions": {
+      "add": [
+        { "name": "Medication name", "dose": "10 mg", "frequency": "once daily" }
+      ],
+      "continue": [
+        { "name": "Medication name", "dose": "10 mg", "frequency": "once daily" }
+      ],
+      "discontinue": [
+        { "name": "Medication name", "dose": "10 mg", "frequency": "once daily" }
+      ]
+    },
+    "infusion_therapy": [
+      "Infusion therapy detail and patient instructions if mentioned"
+    ],
+    "follow_up_labs": [
+      "Ordered lab with timing and instructions"
+    ],
+    "other": [
+      "Referrals, self-monitoring tasks, or other instructions not captured above"
+    ],
+    "follow_up": "Follow-up appointment plan"
+  }
 }}
 
 Respond with ONLY the JSON object, no additional text."""
