@@ -46,22 +46,22 @@ TRANSCRIPT:
 
 Generate the SOAP note in this exact JSON structure:
 {{
-  "patient": {
+  "patient": {{
     "name": "Patient name if mentioned",
     "age": "Age if mentioned",
     "preferred_pronouns": "he/him | she/her | they/them — infer from transcript if not stated"
-  },
+  }},
   "chief_complaints": [
     "Brief description of chief complaint 1",
     "Brief description of chief complaint 2"
   ],
-  "subjective": {
+  "subjective": {{
     "reason_for_visit": "Why the patient came in today including requests, symptoms, relevant updates",
     "current_problem_list": [
       "Active problem 1",
       "Active problem 2"
     ],
-    "symptom_detail": {
+    "symptom_detail": {{
       "duration_timing": "When symptoms started and timing patterns",
       "location_quality_severity": "Where, what kind, how bad",
       "aggravating_alleviating_factors": "What makes it worse or better including self-treatment attempts",
@@ -69,19 +69,19 @@ Generate the SOAP note in this exact JSON structure:
       "previous_episodes": "Past occurrences, how managed, outcomes",
       "impact_on_daily_life": "How symptoms affect daily life, work, activities",
       "associated_symptoms": "Other focal or systemic symptoms accompanying chief complaint"
-    },
+    }},
     "pertinent_side_conversation": "Psychological or emotional context mentioned that may be clinically relevant"
-  },
-  "past_medical_history": {
+  }},
+  "past_medical_history": {{
     "allergies": [
       "Allergy 1",
       "Allergy 2"
     ],
     "medications": [
-      { "name": "Medication name", "dose": "10 mg", "frequency": "twice daily" }
+      {{ "name": "Medication name", "dose": "10 mg", "frequency": "twice daily" }}
     ],
     "supplements": [
-      { "name": "Supplement name", "dose": "500 mg", "frequency": "once daily", "amount": "2 capsules" }
+      {{ "name": "Supplement name", "dose": "500 mg", "frequency": "once daily", "amount": "2 capsules" }}
     ],
     "procedures_surgeries_hospitalizations": [
       "Procedure or surgery 1",
@@ -93,25 +93,25 @@ Generate the SOAP note in this exact JSON structure:
     "social_history": [
       "Relevant social history item 1"
     ],
-    "healthcare_management": {
+    "healthcare_management": {{
       "last_wellness_visit": "Date if mentioned",
       "last_pap": "Date and results if mentioned",
       "colonoscopy": "Date and follow-up if mentioned",
       "mammogram": "Date and results if mentioned",
       "skin_cancer_screening": "Date if mentioned",
       "hcv_status": "Reactivity status if mentioned"
-    }
-  },
+    }}
+  }},
   "review_of_systems": [
-    { "system": "System name", "findings": "Relevant symptoms or pertinent negatives" }
+    {{ "system": "System name", "findings": "Relevant symptoms or pertinent negatives" }}
   ],
-  "objective": {
-    "vitals": {
+  "objective": {{
+    "vitals": {{
       "blood_pressure": "Reading if mentioned",
       "heart_rate": "Reading if mentioned",
       "temperature": "Reading if mentioned",
       "weight": "Reading if mentioned"
-    },
+    }},
     "physical_exam": "Examination findings if documented",
     "labs_reviewed": [
       "Lab result 1 with value and reference range if mentioned"
@@ -122,15 +122,15 @@ Generate the SOAP note in this exact JSON structure:
     "previous_pertinent_labs": [
       "Previous lab result 1"
     ]
-  },
-  "assessment": {
+  }},
+  "assessment": {{
     "diagnoses": [
       "Active diagnosis 1",
       "Suspected diagnosis or symptom complex 1",
       "All issues, problems, or requests discussed"
     ],
     "clinical_discussion": [
-      {
+      {{
         "issue": "Issue or condition name only",
         "assessment": "Likely diagnosis — condition name only",
         "differential": "Differential diagnoses if explicitly mentioned",
@@ -141,35 +141,35 @@ Generate the SOAP note in this exact JSON structure:
         "referrals": [
           "Referral 1 if mentioned"
         ]
-      }
+      }}
     ]
-  },
-  "plan": {
+  }},
+  "plan": {{
     "nutrition_lifestyle": [
       "Specific nutrition or lifestyle intervention discussed"
     ],
-    "supplements": {
+    "supplements": {{
       "add": [
-        { "name": "Supplement name", "dose": "500 mg", "frequency": "twice daily", "amount": "2 capsules" }
+        {{ "name": "Supplement name", "dose": "500 mg", "frequency": "twice daily", "amount": "2 capsules" }}
       ],
       "continue": [
-        { "name": "Supplement name", "dose": "500 mg", "frequency": "once daily", "amount": "1 capsule" }
+        {{ "name": "Supplement name", "dose": "500 mg", "frequency": "once daily", "amount": "1 capsule" }}
       ],
       "discontinue": [
-        { "name": "Supplement name", "dose": "500 mg", "frequency": "once daily" }
+        {{ "name": "Supplement name", "dose": "500 mg", "frequency": "once daily" }}
       ]
-    },
-    "prescriptions": {
+    }},
+    "prescriptions": {{
       "add": [
-        { "name": "Medication name", "dose": "10 mg", "frequency": "once daily" }
+        {{ "name": "Medication name", "dose": "10 mg", "frequency": "once daily" }}
       ],
       "continue": [
-        { "name": "Medication name", "dose": "10 mg", "frequency": "once daily" }
+        {{ "name": "Medication name", "dose": "10 mg", "frequency": "once daily" }}
       ],
       "discontinue": [
-        { "name": "Medication name", "dose": "10 mg", "frequency": "once daily" }
+        {{ "name": "Medication name", "dose": "10 mg", "frequency": "once daily" }}
       ]
-    },
+    }},
     "infusion_therapy": [
       "Infusion therapy detail and patient instructions if mentioned"
     ],
@@ -180,7 +180,7 @@ Generate the SOAP note in this exact JSON structure:
       "Referrals, self-monitoring tasks, or other instructions not captured above"
     ],
     "follow_up": "Follow-up appointment plan"
-  }
+  }}
 }}
 
 Respond with ONLY the JSON object, no additional text."""
