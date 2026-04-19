@@ -236,6 +236,9 @@ export const Layout = ({
 
         {/* Bottom bar */}
         <div className="border-t border-gray-100 p-3 space-y-1 flex-shrink-0">
+          {!sidebarCollapsed && (
+            <p className="text-xs text-gray-300 text-center pb-1">v1.00.00</p>
+          )}
           <button
             onClick={() => setShowSupportModal(true)}
             className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-gray-600 hover:bg-gray-100 transition-colors overflow-hidden"
