@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Check, Trash2, Printer, Send } from 'lucide-react'
@@ -6,7 +6,8 @@ import { Check, Trash2, Printer, Send } from 'lucide-react'
 import { useTranscriptionPolling } from '../hooks/useTranscriptionPolling'
 import { getVisit, updateVisit, deleteVisit, retryTranscription, VisitResponse } from '../api/visits'
 import { LiveRecorder } from '../components/LiveRecorder/LiveRecorder'
-import { generateNote, getNote, syncSection, NoteResponse, SOAPContent } from '../api/notes'
+import { TranscriptSegment } from '../hooks/useLiveTranscription'
+import { generateNote, getNote, syncSection, NoteResponse } from '../api/notes'
 
 type Step = 0 | 1 | 2 // speak=0, summarize=1, sync=2
 
@@ -28,58 +29,92 @@ const sectionPlaceholders: Record<SoapKey, string> = {
   plan: 'Treatment plan, medications, follow-up...',
 }
 
-// Convert a SOAP section object to readable text
-function sectionToText(key: SoapKey, content: SOAPContent): string {
+// Convert a SOAP section object to readable text.
+// Handles both the old schema (chief_complaint, medications, etc.) and
+// the new schema (reason_for_visit, current_medications, prescriptions.add/continue, clinical_discussion, etc.)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function sectionToText(key: SoapKey, content: any): string {
   if (!content) return ''
   const section = content[key]
   if (!section) return ''
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const s = section as any
+  const parts: string[] = []
 
   if (key === 'subjective') {
-    const s = section as SOAPContent['subjective']
-    const parts: string[] = []
-    if (s.chief_complaint) parts.push(`Chief Complaint: ${s.chief_complaint}`)
-    if (s.history_of_present_illness) parts.push(`History: ${s.history_of_present_illness}`)
+    const rv = s.reason_for_visit || s.chief_complaint
+    if (rv) parts.push(`Reason for Visit: ${rv}`)
+    if (s.history_of_present_illness) parts.push(`History of Present Illness: ${s.history_of_present_illness}`)
     if (s.review_of_systems) parts.push(`Review of Systems: ${s.review_of_systems}`)
     if (s.past_medical_history) parts.push(`Past Medical History: ${s.past_medical_history}`)
-    if (s.medications?.length) parts.push(`Medications: ${s.medications.join(', ')}`)
-    if (s.supplements?.length) parts.push(`Supplements: ${s.supplements.join(', ')}`)
+    const meds = s.current_medications ?? s.medications
+    if (meds?.length) parts.push(`Current Medications:\n${meds.map((m: string) => `• ${m}`).join('\n')}`)
+    const supps = s.current_supplements ?? s.supplements
+    if (supps?.length) parts.push(`Current Supplements:\n${supps.map((m: string) => `• ${m}`).join('\n')}`)
     if (s.allergies?.length) parts.push(`Allergies: ${s.allergies.join(', ')}`)
     if (s.social_history) parts.push(`Social History: ${s.social_history}`)
     if (s.family_history) parts.push(`Family History: ${s.family_history}`)
-    return parts.join('\n\n')
   }
+
   if (key === 'objective') {
-    const o = section as SOAPContent['objective']
-    const parts: string[] = []
-    if (o.vitals) {
-      const v = o.vitals
-      const vitals = [v.blood_pressure && `BP ${v.blood_pressure}`, v.heart_rate && `HR ${v.heart_rate}`, v.temperature && `Temp ${v.temperature}`, v.weight && `Weight ${v.weight}`].filter(Boolean)
-      if (vitals.length) parts.push(`Vitals: ${vitals.join(', ')}`)
+    if (s.vitals) {
+      const v = s.vitals
+      const vParts = [
+        v.blood_pressure && `BP ${v.blood_pressure}`,
+        v.heart_rate && `HR ${v.heart_rate}`,
+        v.temperature && `Temp ${v.temperature}`,
+        v.weight && `Weight ${v.weight}`,
+        v.height && `Height ${v.height}`,
+        v.bmi && `BMI ${v.bmi}`,
+      ].filter(Boolean)
+      if (vParts.length) parts.push(`Vitals: ${vParts.join(', ')}`)
     }
-    if (o.physical_exam) parts.push(`Physical Exam: ${o.physical_exam}`)
-    if (o.lab_results) parts.push(`Lab Results: ${o.lab_results}`)
-    return parts.join('\n\n')
+    if (s.physical_exam) parts.push(`Physical Exam: ${s.physical_exam}`)
+    if (s.lab_results) parts.push(`Lab Results: ${s.lab_results}`)
   }
+
   if (key === 'assessment') {
-    const a = section as SOAPContent['assessment']
-    const parts: string[] = []
-    if (a.diagnoses?.length) parts.push(`Diagnoses: ${a.diagnoses.join('; ')}`)
-    if (a.clinical_reasoning) parts.push(`Clinical Reasoning: ${a.clinical_reasoning}`)
-    return parts.join('\n\n')
+    if (s.diagnoses?.length) parts.push(`Diagnoses:\n${s.diagnoses.map((d: string) => `• ${d}`).join('\n')}`)
+    // New: clinical_discussion array
+    if (s.clinical_discussion?.length) {
+      const disc = s.clinical_discussion.map((d: any) => {
+        const lines = [`${d.issue}`]
+        if (d.findings) lines.push(`  Findings: ${d.findings}`)
+        if (d.interpretation) lines.push(`  Assessment: ${d.interpretation}`)
+        if (d.plan_summary) lines.push(`  Plan: ${d.plan_summary}`)
+        return lines.join('\n')
+      }).join('\n\n')
+      parts.push(`Clinical Discussion:\n${disc}`)
+    }
+    if (s.clinical_reasoning) parts.push(`Clinical Reasoning: ${s.clinical_reasoning}`)
   }
+
   if (key === 'plan') {
-    const p = section as SOAPContent['plan']
-    const parts: string[] = []
-    if (p.treatment_plan) parts.push(`Treatment Plan: ${p.treatment_plan}`)
-    if (p.medications_prescribed?.length) parts.push(`Medications Prescribed: ${p.medications_prescribed.join(', ')}`)
-    if (p.supplements_recommended?.length) parts.push(`Supplements: ${p.supplements_recommended.join(', ')}`)
-    if (p.lifestyle_recommendations) parts.push(`Lifestyle: ${p.lifestyle_recommendations}`)
-    if (p.lab_orders?.length) parts.push(`Lab Orders: ${p.lab_orders.join(', ')}`)
-    if (p.follow_up) parts.push(`Follow-up: ${p.follow_up}`)
-    if (p.patient_education) parts.push(`Patient Education: ${p.patient_education}`)
-    return parts.join('\n\n')
+    if (s.treatment_plan) parts.push(`Treatment Plan: ${s.treatment_plan}`)
+    // New: structured prescriptions
+    if (s.prescriptions) {
+      if (s.prescriptions.add?.length) parts.push(`New Prescriptions:\n${s.prescriptions.add.map((m: string) => `• ${m}`).join('\n')}`)
+      if (s.prescriptions.continue?.length) parts.push(`Continuing Prescriptions:\n${s.prescriptions.continue.map((m: string) => `• ${m}`).join('\n')}`)
+      if (s.prescriptions.discontinue?.length) parts.push(`Discontinued Prescriptions:\n${s.prescriptions.discontinue.map((m: string) => `• ${m}`).join('\n')}`)
+    } else if (s.medications_prescribed?.length) {
+      parts.push(`Medications Prescribed:\n${s.medications_prescribed.map((m: string) => `• ${m}`).join('\n')}`)
+    }
+    // New: structured supplements
+    if (s.supplements && (s.supplements.add || s.supplements.continue || s.supplements.discontinue)) {
+      if (s.supplements.add?.length) parts.push(`New Supplements:\n${s.supplements.add.map((m: string) => `• ${m}`).join('\n')}`)
+      if (s.supplements.continue?.length) parts.push(`Continuing Supplements:\n${s.supplements.continue.map((m: string) => `• ${m}`).join('\n')}`)
+      if (s.supplements.discontinue?.length) parts.push(`Discontinued Supplements:\n${s.supplements.discontinue.map((m: string) => `• ${m}`).join('\n')}`)
+    } else if (s.supplements_recommended?.length) {
+      parts.push(`Supplements:\n${s.supplements_recommended.map((m: string) => `• ${m}`).join('\n')}`)
+    }
+    if (s.lab_orders?.length) parts.push(`Lab Orders:\n${s.lab_orders.map((l: string) => `• ${l}`).join('\n')}`)
+    if (s.imaging_or_referrals?.length) parts.push(`Imaging / Referrals:\n${s.imaging_or_referrals.map((r: string) => `• ${r}`).join('\n')}`)
+    if (s.lifestyle_recommendations) parts.push(`Lifestyle Recommendations: ${s.lifestyle_recommendations}`)
+    if (s.follow_up) parts.push(`Follow-up: ${s.follow_up}`)
+    if (s.patient_education) parts.push(`Patient Education: ${s.patient_education}`)
   }
-  return ''
+
+  return parts.join('\n\n')
 }
 
 // SVG ring progress component for step 3
@@ -186,6 +221,33 @@ export const VisitDetail = () => {
   const [isSendingEmail, setIsSendingEmail] = useState(false)
   const [sendEmailError, setSendEmailError] = useState<string | null>(null)
 
+  // Live recording done state (persists even if user navigates back to step 0)
+  const [liveRecordingDone, setLiveRecordingDone] = useState(false)
+  // Accumulate segments as they arrive (mirrors hook deduplication logic) — bypasses closure staleness
+  const liveSegmentsRef = useRef<{ speaker: string; text: string }[]>([])
+  const liveLastWasInterimRef = useRef(false)
+
+  const handleLiveTranscript = useCallback((segment: TranscriptSegment) => {
+    if (!segment.text) return
+    const arr = liveSegmentsRef.current
+    const entry = { speaker: segment.speaker, text: segment.text }
+    if (!segment.isFinal) {
+      if (liveLastWasInterimRef.current && arr.length > 0) {
+        arr[arr.length - 1] = entry
+      } else {
+        arr.push(entry)
+      }
+      liveLastWasInterimRef.current = true
+    } else {
+      if (liveLastWasInterimRef.current && arr.length > 0) {
+        arr[arr.length - 1] = entry
+      } else {
+        arr.push(entry)
+      }
+      liveLastWasInterimRef.current = false
+    }
+  }, [])
+
   // Upload state
   const [isRetrying, setIsRetrying] = useState(false)
 
@@ -281,15 +343,33 @@ export const VisitDetail = () => {
   })
 
   // Step 2: auto-generate note if transcript ready but no note
+  // Fires for both batch (transcription_status === 'completed') and live recording paths
   useEffect(() => {
-    if (currentStep === 1 && visit?.transcription_status === 'completed' && visit.transcript && !note && !isGeneratingNote) {
-      handleGenerateNote()
+    if (currentStep === 1 && !note && !isGeneratingNote) {
+      const batchReady = visit?.transcription_status === 'completed' && Boolean(visit?.transcript)
+      if (batchReady || liveRecordingDone) {
+        handleGenerateNote()
+      }
     }
-  }, [currentStep, visit?.transcription_status, visit?.transcript, note])
+  }, [currentStep, visit?.transcription_status, visit?.transcript, note, liveRecordingDone])
 
-  const handleLiveComplete = useCallback((transcript: string) => {
-    setVisit(prev => prev ? { ...prev, transcript, transcription_status: 'completed' } : prev)
-  }, [])
+  const handleLiveComplete = useCallback(async (_transcript: string) => {
+    setLiveRecordingDone(true)
+
+    // Poll DB to get the authoritative saved transcript (for the plain-text fallback)
+    if (!visitId) return
+    let attempts = 0
+    const poll = async () => {
+      try {
+        const fresh = await getVisit(visitId)
+        setVisit(fresh)
+        if (!fresh.transcript && attempts < 12) { attempts++; setTimeout(poll, 2000) }
+      } catch {
+        if (attempts < 12) { attempts++; setTimeout(poll, 2000) }
+      }
+    }
+    poll()
+  }, [visitId])
 
   const handleGenerateNote = async () => {
     if (!visitId) return
@@ -455,11 +535,43 @@ export const VisitDetail = () => {
             exit={{ opacity: 0, y: -10 }}
             className="space-y-4"
           >
-            {/* Live recorder — handles its own transcript display, controls, and status */}
-            <LiveRecorder
-              visitId={visitId!}
-              onComplete={handleLiveComplete}
-            />
+            {liveRecordingDone ? (
+              /* Recording done — show transcript; LiveRecorder not remounted so state isn't lost */
+              <div className="space-y-3">
+                <p className="text-sm text-green-600">Recording complete. Transcript saved.</p>
+                {liveSegmentsRef.current.length > 0 ? (
+                  /* Diarized view — segments with speaker labels */
+                  <div className="bg-white border border-gray-200 rounded-2xl p-4 max-h-80 overflow-y-auto space-y-3">
+                    {liveSegmentsRef.current.map((seg, i) => (
+                      <div key={i} className="flex gap-3">
+                        <span className={`shrink-0 text-xs font-medium px-2 py-0.5 rounded-full h-fit mt-0.5 ${
+                          seg.speaker === 'provider'
+                            ? 'bg-[#4ac6d6]/20 text-[#2a8fa0]'
+                            : 'bg-gray-100 text-gray-600'
+                        }`}>
+                          {seg.speaker === 'provider' ? 'Provider' : 'Patient'}
+                        </span>
+                        <p className="text-sm text-gray-700 leading-relaxed">{seg.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : visit.transcript ? (
+                  /* Plain text fallback from DB */
+                  <div className="bg-white border border-gray-200 rounded-2xl p-4 max-h-80 overflow-y-auto">
+                    <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{visit.transcript}</p>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-400 italic text-center py-2">Loading transcript...</p>
+                )}
+              </div>
+            ) : (
+              /* Live recorder — handles its own transcript display, controls, and status */
+              <LiveRecorder
+                visitId={visitId!}
+                onComplete={handleLiveComplete}
+                onTranscript={handleLiveTranscript}
+              />
+            )}
 
             {/* Batch retry fallback — only shown when visit has audio but transcription failed */}
             {(visit.transcription_status === 'failed' || polling.status === 'failed') && visit.audio_file_path && (
@@ -477,8 +589,8 @@ export const VisitDetail = () => {
               </div>
             )}
 
-            {/* Advance button when transcript is ready */}
-            {(visit.transcript || polling.transcript) && (
+            {/* Advance button when transcript is ready (batch or live) */}
+            {(liveRecordingDone || visit.transcript || polling.transcript) && (
               <button
                 onClick={() => setCurrentStep(1)}
                 className="w-full border-2 border-[#4ac6d6] text-[#4ac6d6] rounded-xl py-3 hover:bg-[#4ac6d6]/10 transition-colors"

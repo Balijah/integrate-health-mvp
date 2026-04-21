@@ -4,7 +4,7 @@
  * Main component for live transcription with real-time audio streaming.
  */
 
-import { useLiveTranscription } from '../../hooks/useLiveTranscription'
+import { useLiveTranscription, TranscriptSegment } from '../../hooks/useLiveTranscription'
 import { RecorderControls } from './RecorderControls'
 import { LiveTranscript } from './LiveTranscript'
 
@@ -15,6 +15,8 @@ interface LiveRecorderProps {
   onComplete: (transcript: string) => void
   /** Callback when error occurs */
   onError?: (error: string) => void
+  /** Callback for each transcript segment as it arrives */
+  onTranscript?: (segment: TranscriptSegment) => void
 }
 
 /**
@@ -30,6 +32,7 @@ export const LiveRecorder = ({
   visitId,
   onComplete,
   onError,
+  onTranscript,
 }: LiveRecorderProps) => {
   const {
     isConnected,
@@ -43,7 +46,7 @@ export const LiveRecorder = ({
     pauseRecording,
     resumeRecording,
     stopRecording,
-  } = useLiveTranscription(visitId, { onError })
+  } = useLiveTranscription(visitId, { onError, onTranscript })
 
   const handleStop = async () => {
     try {

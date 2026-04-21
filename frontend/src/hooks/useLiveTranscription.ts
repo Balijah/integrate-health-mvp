@@ -83,6 +83,7 @@ export const useLiveTranscription = (
 
   const [status, setStatus] = useState<LiveTranscriptionStatus>('idle')
   const [transcript, setTranscript] = useState<TranscriptSegment[]>([])
+  const transcriptRef = useRef<TranscriptSegment[]>([]) // always-current ref, avoids closure staleness
   const [duration, setDuration] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [isConnected, setIsConnected] = useState(false)
@@ -98,13 +99,9 @@ export const useLiveTranscription = (
   const isConnectedRef = useRef(false)
 
   // Keep refs in sync with state
-  useEffect(() => {
-    statusRef.current = status
-  }, [status])
-
-  useEffect(() => {
-    isConnectedRef.current = isConnected
-  }, [isConnected])
+  useEffect(() => { statusRef.current = status }, [status])
+  useEffect(() => { isConnectedRef.current = isConnected }, [isConnected])
+  useEffect(() => { transcriptRef.current = transcript }, [transcript])
 
   // Convert Float32Array to Int16Array (PCM)
   const floatTo16BitPCM = (float32Array: Float32Array): ArrayBuffer => {
@@ -403,14 +400,14 @@ export const useLiveTranscription = (
     isConnectedRef.current = false
     sessionIdRef.current = null
 
-    // Combine local transcript segments (the WebSocket already received all transcripts)
-    const localTranscript = transcript
-      .filter((seg) => seg.isFinal)
-      .map((seg) => seg.text)
-      .join(' ')
+    // Read from ref — always current, no closure staleness
+    const current = transcriptRef.current
+    const finalSegments = current.filter((seg) => seg.isFinal)
+    const segmentsToJoin = finalSegments.length > 0 ? finalSegments : current
+    const localTranscript = segmentsToJoin.map((seg) => seg.text).join(' ')
 
     return localTranscript
-  }, [transcript])
+  }, [])
 
   // Reset hook state
   const reset = useCallback(() => {

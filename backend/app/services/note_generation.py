@@ -24,68 +24,82 @@ class NoteGenerationError(Exception):
 
 
 # System prompt for functional medicine SOAP note generation
-SYSTEM_PROMPT = """You are an expert medical documentation assistant specializing in functional medicine. Your role is to generate comprehensive SOAP notes from patient visit transcripts.
+SYSTEM_PROMPT = """You are an expert medical documentation assistant specializing in functional medicine. Generate comprehensive SOAP notes from patient visit transcripts.
 
-Functional medicine focuses on identifying and addressing root causes of disease through a systems-oriented approach. When generating notes, consider:
-- Root cause analysis rather than just symptom management
-- Interconnections between body systems
-- Lifestyle factors (diet, sleep, stress, exercise)
-- Environmental factors and toxin exposure
-- Nutritional deficiencies and supplementation
-- Gut health and microbiome considerations
-- Hormonal balance
-- Inflammation markers
+CRITICAL RULES:
+- Only include information explicitly mentioned in the transcript or contextual notes
+- Never invent, infer, or hallucinate clinical details not present in the source material
+- Omit any JSON key entirely if the information was not mentioned — do not use empty strings or empty arrays
+- Always use the patient's preferred gender pronouns throughout
+- For all dosages and frequencies, always use numerals (e.g., "10 mg twice daily" not "ten milligrams two times a day")
+- For supplements, always include the exact number of capsules or scoops discussed
+- The plan section must be a comprehensive summary of ALL interventions discussed — systematically review every issue in clinical_discussion and ensure nothing is missed
 
-Generate structured SOAP notes in the exact JSON format specified. Be thorough but concise. Extract all relevant clinical information from the transcript.
-
-If information is not mentioned in the transcript, use empty strings or empty arrays for those fields - do not make up information.
-
-Important: Your response must be valid JSON only, with no additional text before or after."""
+Respond with ONLY valid JSON. No text before or after."""
 
 USER_PROMPT_TEMPLATE = """Generate a SOAP note from the following patient visit transcript.
 
-{additional_context}
-
-TRANSCRIPT:
+{additional_context_block}TRANSCRIPT:
 {transcript}
 
-Generate the SOAP note in this exact JSON structure:
+Generate the SOAP note in this exact JSON structure. Omit any key for which no information was mentioned — do not include empty strings or empty arrays:
+
+```json
 {{
   "subjective": {{
-    "chief_complaint": "Main reason for visit",
-    "history_of_present_illness": "Detailed history of current condition",
-    "review_of_systems": "Systems review findings",
-    "past_medical_history": "Relevant past medical history",
-    "medications": ["List of current medications"],
-    "supplements": ["List of current supplements"],
-    "allergies": ["Known allergies"],
-    "social_history": "Lifestyle factors, occupation, habits",
-    "family_history": "Relevant family medical history"
+    "reason_for_visit": "Primary reason the patient came in today",
+    "history_of_present_illness": "Detailed narrative of current symptoms, onset, duration, and progression",
+    "review_of_systems": "Pertinent positive and negative findings across body systems",
+    "past_medical_history": "Relevant diagnoses, surgeries, hospitalizations",
+    "current_medications": ["Medication name, dose, and frequency for each current prescription"],
+    "current_supplements": ["Supplement name, dose, and frequency for each supplement currently taken"],
+    "allergies": ["Allergen and reaction type"],
+    "social_history": "Lifestyle factors: diet, exercise, sleep, stress, occupation, substance use",
+    "family_history": "Relevant family medical conditions"
   }},
   "objective": {{
     "vitals": {{
-      "blood_pressure": "BP reading if mentioned",
-      "heart_rate": "HR if mentioned",
-      "temperature": "Temp if mentioned",
-      "weight": "Weight if mentioned"
+      "blood_pressure": "systolic/diastolic mmHg",
+      "heart_rate": "bpm",
+      "temperature": "degrees F or C",
+      "weight": "lbs or kg",
+      "height": "ft/in or cm",
+      "bmi": "numeric value"
     }},
-    "physical_exam": "Physical examination findings",
-    "lab_results": "Any lab results discussed"
+    "physical_exam": "Relevant physical examination findings",
+    "lab_results": "Lab values reviewed during this visit with reference ranges where mentioned"
   }},
   "assessment": {{
-    "diagnoses": ["Primary and secondary diagnoses/impressions"],
-    "clinical_reasoning": "Clinical reasoning and root cause analysis"
+    "diagnoses": ["Primary diagnosis or impression", "Additional diagnoses if mentioned"],
+    "clinical_discussion": [
+      {{
+        "issue": "Name of the clinical issue or symptom discussed",
+        "findings": "Relevant findings, lab values, or patient-reported data for this issue",
+        "interpretation": "Clinical interpretation or root-cause reasoning",
+        "plan_summary": "Brief summary of the plan for this specific issue"
+      }}
+    ],
+    "clinical_reasoning": "Overall root-cause analysis tying all issues together"
   }},
   "plan": {{
-    "treatment_plan": "Overall treatment approach",
-    "medications_prescribed": ["New medications prescribed"],
-    "supplements_recommended": ["Supplements recommended"],
-    "lifestyle_recommendations": "Diet, exercise, sleep, stress management recommendations",
-    "lab_orders": ["Labs ordered"],
-    "follow_up": "Follow-up plan",
-    "patient_education": "Education provided to patient"
+    "prescriptions": {{
+      "add": ["New prescription: medication name, dose, frequency, and any special instructions"],
+      "continue": ["Continuing prescription: medication name, dose, frequency"],
+      "discontinue": ["Discontinued prescription: medication name and reason if stated"]
+    }},
+    "supplements": {{
+      "add": ["New supplement: name, dose (capsules/scoops/mg), frequency, and timing"],
+      "continue": ["Continuing supplement: name, dose, frequency"],
+      "discontinue": ["Discontinued supplement: name and reason if stated"]
+    }},
+    "lab_orders": ["Test name and clinical indication"],
+    "imaging_or_referrals": ["Imaging ordered or referral made, with reason"],
+    "lifestyle_recommendations": "Specific diet, exercise, sleep, and stress management instructions given",
+    "patient_education": "Topics discussed and key points communicated to the patient",
+    "follow_up": "Follow-up timeframe and conditions for return visit"
   }}
 }}
+```
 
 Respond with ONLY the JSON object, no additional text."""
 
@@ -158,7 +172,7 @@ def _extract_json_from_response(response_text: str) -> dict:
     raise json.JSONDecodeError("Could not extract valid JSON from response", response_text, 0)
 
 
-def generate_soap_note(transcript: str, additional_context: str | None = None) -> dict:
+def generate_soap_note(transcript: str, additional_context: str = "") -> dict:
     """
     Generate a SOAP note from a transcript using AWS Bedrock.
 
@@ -181,13 +195,14 @@ def generate_soap_note(transcript: str, additional_context: str | None = None) -
         # Initialize Bedrock client
         bedrock = _get_bedrock_client()
 
-        # Build user prompt
-        context_section = ""
-        if additional_context:
-            context_section = f"ADDITIONAL CONTEXT:\n{additional_context}\n\n"
+        # Build additional context block
+        if additional_context and additional_context.strip():
+            additional_context_block = f"ADDITIONAL CONTEXT:\n{additional_context}\n\n"
+        else:
+            additional_context_block = ""
 
         user_prompt = USER_PROMPT_TEMPLATE.format(
-            additional_context=context_section,
+            additional_context_block=additional_context_block,
             transcript=transcript,
         )
 
@@ -202,8 +217,14 @@ def generate_soap_note(transcript: str, additional_context: str | None = None) -
             ],
         }
 
-        # Call Bedrock API
-        logger.info(f"Generating SOAP note with Bedrock ({settings.bedrock_model_id})...")
+        # Log full request before sending
+        logger.info(
+            f"[BEDROCK REQUEST] model={settings.bedrock_model_id} "
+            f"max_tokens={settings.bedrock_max_tokens} temperature={settings.bedrock_temperature} "
+            f"transcript_len={len(transcript)} context_len={len(additional_context_block)}"
+        )
+        logger.info(f"[BEDROCK SYSTEM PROMPT]\n{SYSTEM_PROMPT}")
+        logger.info(f"[BEDROCK USER PROMPT]\n{user_prompt}")
 
         response = bedrock.invoke_model(
             modelId=settings.bedrock_model_id,
@@ -215,22 +236,29 @@ def generate_soap_note(transcript: str, additional_context: str | None = None) -
         # Parse response
         response_body = json.loads(response["body"].read())
 
-        # Extract response text
+        # Extract response text and strip any code fences the model may include
         response_text = response_body["content"][0]["text"]
+        response_text = re.sub(
+            r"^```(?:json)?\s*|\s*```$", "", response_text.strip(), flags=re.MULTILINE
+        )
 
         # Capture token usage from Bedrock response
         usage = response_body.get("usage", {})
         input_tokens = usage.get("input_tokens", 0)
         output_tokens = usage.get("output_tokens", 0)
 
-        logger.info(f"Bedrock API usage - Input tokens: {input_tokens}, Output tokens: {output_tokens}")
+        logger.info(
+            f"[BEDROCK RESPONSE] input_tokens={input_tokens} output_tokens={output_tokens} "
+            f"response_len={len(response_text)}"
+        )
+        logger.info(f"[BEDROCK RAW RESPONSE]\n{response_text}")
 
         # Parse JSON response - handle potential markdown code blocks or extra text
         try:
             soap_content = _extract_json_from_response(response_text)
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse Bedrock response as JSON (length={len(response_text)})")
-            logger.debug(f"Response content: {response_text[:500]}...")
+            logger.error(f"[BEDROCK] Failed to parse response as JSON (length={len(response_text)}): {e}")
+            logger.error(f"[BEDROCK RAW UNPARSEABLE RESPONSE]\n{response_text}")
             raise NoteGenerationError(f"Failed to parse generated note: {str(e)}")
 
         # Add metadata including token usage
