@@ -206,6 +206,8 @@ export const VisitDetail = () => {
     subjective: '', objective: '', assessment: '', plan: ''
   })
   const [isGeneratingNote, setIsGeneratingNote] = useState(false)
+  // true once the initial loadNote() attempt for this visit has completed
+  const [noteLoadAttempted, setNoteLoadAttempted] = useState(false)
 
   // Sync state
   const [syncedSections, setSyncedSections] = useState<SyncStatus>({
@@ -270,6 +272,10 @@ export const VisitDetail = () => {
     setSummaryEmail('')
     setChiefComplaintDraft('')
     setVisitDateDraft('')
+    setLiveRecordingDone(false)
+    liveSegmentsRef.current = []
+    liveLastWasInterimRef.current = false
+    setNoteLoadAttempted(false)
     setIsLoading(true)
     getVisit(visitId)
       .then(v => {
@@ -307,6 +313,8 @@ export const VisitDetail = () => {
       }
     } catch {
       // note doesn't exist yet
+    } finally {
+      setNoteLoadAttempted(true)
     }
   }, [visitId])
 
@@ -343,15 +351,15 @@ export const VisitDetail = () => {
   })
 
   // Step 2: auto-generate note if transcript ready but no note
-  // Fires for both batch (transcription_status === 'completed') and live recording paths
+  // Waits for noteLoadAttempted to avoid racing with the initial loadNote() call
   useEffect(() => {
-    if (currentStep === 1 && !note && !isGeneratingNote) {
+    if (currentStep === 1 && !note && !isGeneratingNote && noteLoadAttempted) {
       const batchReady = visit?.transcription_status === 'completed' && Boolean(visit?.transcript)
       if (batchReady || liveRecordingDone) {
         handleGenerateNote()
       }
     }
-  }, [currentStep, visit?.transcription_status, visit?.transcript, note, liveRecordingDone])
+  }, [currentStep, visit?.transcription_status, visit?.transcript, note, liveRecordingDone, noteLoadAttempted])
 
   const handleLiveComplete = useCallback(async (_transcript: string) => {
     setLiveRecordingDone(true)
@@ -376,9 +384,12 @@ export const VisitDetail = () => {
     setIsGeneratingNote(true)
     try {
       await generateNote(visitId)
-      await loadNote()
     } catch {
-      // ignore — note generation can fail silently for now
+      // ignore — may fail if note already exists
+    }
+    // always load the note after attempting generation, whether just created or pre-existing
+    try {
+      await loadNote()
     } finally {
       setIsGeneratingNote(false)
     }
@@ -536,7 +547,7 @@ export const VisitDetail = () => {
             className="space-y-4"
           >
             {liveRecordingDone ? (
-              /* Recording done — show transcript; LiveRecorder not remounted so state isn't lost */
+              /* Live recording just finished — show diarized segments or DB fallback */
               <div className="space-y-3">
                 <p className="text-sm text-green-600">Recording complete. Transcript saved.</p>
                 {liveSegmentsRef.current.length > 0 ? (
@@ -563,6 +574,14 @@ export const VisitDetail = () => {
                 ) : (
                   <p className="text-sm text-gray-400 italic text-center py-2">Loading transcript...</p>
                 )}
+              </div>
+            ) : visit.transcript ? (
+              /* Transcript already in DB (re-loaded visit) — show it directly */
+              <div className="space-y-3">
+                <p className="text-sm text-green-600">Recording complete. Transcript saved.</p>
+                <div className="bg-white border border-gray-200 rounded-2xl p-4 max-h-80 overflow-y-auto">
+                  <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{visit.transcript}</p>
+                </div>
               </div>
             ) : (
               /* Live recorder — handles its own transcript display, controls, and status */

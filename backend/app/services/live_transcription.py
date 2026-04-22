@@ -51,19 +51,18 @@ class LiveTranscriptionSession:
         return int(total_elapsed - self.total_pause_duration)
 
     def get_full_transcript(self) -> str:
-        """Combine all final transcript segments."""
+        """Combine transcript segments; prefer final, fall back to all."""
         with self._lock:
-            final_segments = [
-                seg["text"] for seg in self.transcript_buffer if seg.get("is_final", False)
-            ]
-            return " ".join(final_segments)
+            final_texts = [seg["text"] for seg in self.transcript_buffer if seg.get("is_final") and seg.get("text")]
+            if final_texts:
+                return " ".join(final_texts)
+            # Deepgram may not send is_final before close — use all segments as fallback
+            return " ".join(seg["text"] for seg in self.transcript_buffer if seg.get("text"))
 
     def add_transcript(self, data: dict) -> None:
         """Add a transcript segment (thread-safe)."""
         with self._lock:
-            if data.get("is_final", False):
-                self.transcript_buffer.append(data)
-            # Put in queue for WebSocket to consume
+            self.transcript_buffer.append(data)   # store all, not just final
             self.message_queue.put(data)
 
     def get_pending_messages(self) -> list[dict]:

@@ -116,8 +116,15 @@ if [ "$SKIP_FRONTEND" = false ]; then
     exit 1
   fi
   echo "=== Frontend deploy complete ==="
+
+  echo "=== Invalidating CloudFront cache ==="
+  aws cloudfront create-invalidation \
+    --distribution-id "$CF_DISTRIBUTION" \
+    --paths "/*" \
+    --query 'Invalidation.Id' --output text
+  echo "=== CloudFront invalidation created ==="
 fi
 
 echo ""
 echo "=== DEPLOY COMPLETE ==="
-echo "Site: https://d3nem3tkboqfr7.cloudfront.net"
+echo "Site: https://app.integratehealth.ai"

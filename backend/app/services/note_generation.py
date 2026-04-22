@@ -42,61 +42,61 @@ USER_PROMPT_TEMPLATE = """Generate a SOAP note from the following patient visit 
 {additional_context_block}TRANSCRIPT:
 {transcript}
 
-Generate the SOAP note in this exact JSON structure. Omit any key for which no information was mentioned — do not include empty strings or empty arrays:
+IMPORTANT: Values shown in [brackets] below are field descriptions only — never output bracket text. Omit any key for which the transcript contains no information.
 
 ```json
 {{
   "subjective": {{
-    "reason_for_visit": "Primary reason the patient came in today",
-    "history_of_present_illness": "Detailed narrative of current symptoms, onset, duration, and progression",
-    "review_of_systems": "Pertinent positive and negative findings across body systems",
-    "past_medical_history": "Relevant diagnoses, surgeries, hospitalizations",
-    "current_medications": ["Medication name, dose, and frequency for each current prescription"],
-    "current_supplements": ["Supplement name, dose, and frequency for each supplement currently taken"],
-    "allergies": ["Allergen and reaction type"],
-    "social_history": "Lifestyle factors: diet, exercise, sleep, stress, occupation, substance use",
-    "family_history": "Relevant family medical conditions"
+    "reason_for_visit": "[omit if not mentioned]",
+    "history_of_present_illness": "[omit if not mentioned]",
+    "review_of_systems": "[omit if not mentioned]",
+    "past_medical_history": "[omit if not mentioned]",
+    "current_medications": ["[name, dose, frequency — omit array if none mentioned]"],
+    "current_supplements": ["[name, dose, frequency — omit array if none mentioned]"],
+    "allergies": ["[allergen and reaction — omit array if none mentioned]"],
+    "social_history": "[omit if not mentioned]",
+    "family_history": "[omit if not mentioned]"
   }},
   "objective": {{
     "vitals": {{
-      "blood_pressure": "systolic/diastolic mmHg",
-      "heart_rate": "bpm",
-      "temperature": "degrees F or C",
-      "weight": "lbs or kg",
-      "height": "ft/in or cm",
-      "bmi": "numeric value"
+      "blood_pressure": "[omit if not mentioned]",
+      "heart_rate": "[omit if not mentioned]",
+      "temperature": "[omit if not mentioned]",
+      "weight": "[omit if not mentioned]",
+      "height": "[omit if not mentioned]",
+      "bmi": "[omit if not mentioned]"
     }},
-    "physical_exam": "Relevant physical examination findings",
-    "lab_results": "Lab values reviewed during this visit with reference ranges where mentioned"
+    "physical_exam": "[omit if not mentioned]",
+    "lab_results": "[omit if not mentioned]"
   }},
   "assessment": {{
-    "diagnoses": ["Primary diagnosis or impression", "Additional diagnoses if mentioned"],
+    "diagnoses": ["[diagnosis — omit array if none mentioned]"],
     "clinical_discussion": [
       {{
-        "issue": "Name of the clinical issue or symptom discussed",
-        "findings": "Relevant findings, lab values, or patient-reported data for this issue",
-        "interpretation": "Clinical interpretation or root-cause reasoning",
-        "plan_summary": "Brief summary of the plan for this specific issue"
+        "issue": "[clinical issue]",
+        "findings": "[omit if not mentioned]",
+        "interpretation": "[omit if not mentioned]",
+        "plan_summary": "[omit if not mentioned]"
       }}
     ],
-    "clinical_reasoning": "Overall root-cause analysis tying all issues together"
+    "clinical_reasoning": "[omit if not mentioned]"
   }},
   "plan": {{
     "prescriptions": {{
-      "add": ["New prescription: medication name, dose, frequency, and any special instructions"],
-      "continue": ["Continuing prescription: medication name, dose, frequency"],
-      "discontinue": ["Discontinued prescription: medication name and reason if stated"]
+      "add": ["[omit array if none]"],
+      "continue": ["[omit array if none]"],
+      "discontinue": ["[omit array if none]"]
     }},
     "supplements": {{
-      "add": ["New supplement: name, dose (capsules/scoops/mg), frequency, and timing"],
-      "continue": ["Continuing supplement: name, dose, frequency"],
-      "discontinue": ["Discontinued supplement: name and reason if stated"]
+      "add": ["[omit array if none]"],
+      "continue": ["[omit array if none]"],
+      "discontinue": ["[omit array if none]"]
     }},
-    "lab_orders": ["Test name and clinical indication"],
-    "imaging_or_referrals": ["Imaging ordered or referral made, with reason"],
-    "lifestyle_recommendations": "Specific diet, exercise, sleep, and stress management instructions given",
-    "patient_education": "Topics discussed and key points communicated to the patient",
-    "follow_up": "Follow-up timeframe and conditions for return visit"
+    "lab_orders": ["[test and indication — omit array if none]"],
+    "imaging_or_referrals": ["[imaging or referral and reason — omit array if none]"],
+    "lifestyle_recommendations": "[omit if not mentioned]",
+    "patient_education": "[omit if not mentioned]",
+    "follow_up": "[omit if not mentioned]"
   }}
 }}
 ```

@@ -228,9 +228,19 @@ async def transcription_websocket(
         except asyncio.CancelledError:
             pass
 
-        # Clean up the session if still active
+        # Clean up the session if still active (e.g., client disconnected without stop command)
+        # and save transcript to DB so it isn't lost
         try:
             if service.get_session(session_id):
-                service.end_session(session_id)
+                result = service.end_session(session_id)
+                if result.get("transcript"):
+                    await update_database_on_stop(
+                        session_id=session_id,
+                        transcript=result["transcript"],
+                        duration=result["total_duration_seconds"],
+                        word_count=result["word_count"],
+                        pause_count=result["pause_count"],
+                    )
+                    logger.info(f"Transcript saved on disconnect for session {session_id}")
         except Exception as e:
             logger.error(f"Error cleaning up session on disconnect: {e}")
