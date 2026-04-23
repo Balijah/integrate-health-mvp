@@ -25,7 +25,14 @@ from app.services.live_transcription import (
 logger = logging.getLogger(__name__)
 
 
-async def update_database_on_stop(session_id: str, transcript: str, duration: int, word_count: int, pause_count: int):
+async def update_database_on_stop(
+    session_id: str,
+    transcript: str,
+    duration: int,
+    word_count: int,
+    pause_count: int,
+    transcript_segments: list | None = None,
+):
     """Update database records when transcription stops."""
     settings = get_settings()
     engine = create_async_engine(settings.database_url)
@@ -54,6 +61,8 @@ async def update_database_on_stop(session_id: str, transcript: str, duration: in
                     visit.transcript = transcript
                     visit.transcription_status = "completed"
                     visit.audio_duration_seconds = duration
+                    if transcript_segments is not None:
+                        visit.transcript_segments = transcript_segments
 
                 await db.commit()
                 logger.info(f"Database updated for session {session_id}")
@@ -176,13 +185,14 @@ async def transcription_websocket(
                 try:
                     result = service.end_session(session_id)
 
-                    # Update database with final transcript
+                    # Update database with final transcript and segments
                     await update_database_on_stop(
                         session_id=session_id,
                         transcript=result["transcript"],
                         duration=result["total_duration_seconds"],
                         word_count=result["word_count"],
                         pause_count=result["pause_count"],
+                        transcript_segments=result.get("transcript_segments"),
                     )
 
                     await websocket.send_json({
@@ -240,6 +250,7 @@ async def transcription_websocket(
                         duration=result["total_duration_seconds"],
                         word_count=result["word_count"],
                         pause_count=result["pause_count"],
+                        transcript_segments=result.get("transcript_segments"),
                     )
                     logger.info(f"Transcript saved on disconnect for session {session_id}")
         except Exception as e:

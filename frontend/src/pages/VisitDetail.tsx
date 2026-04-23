@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Check, Trash2, Printer, Send } from 'lucide-react'
+import { Check, Trash2, Printer, Send, ChevronDown } from 'lucide-react'
 
 import { useTranscriptionPolling } from '../hooks/useTranscriptionPolling'
 import { getVisit, updateVisit, deleteVisit, retryTranscription, VisitResponse } from '../api/visits'
@@ -77,14 +77,19 @@ function sectionToText(key: SoapKey, content: any): string {
     if (s.diagnoses?.length) parts.push(`Diagnoses:\n${s.diagnoses.map((d: string) => `• ${d}`).join('\n')}`)
     // New: clinical_discussion array
     if (s.clinical_discussion?.length) {
-      const disc = s.clinical_discussion.map((d: any) => {
-        const lines = [`${d.issue}`]
-        if (d.findings) lines.push(`  Findings: ${d.findings}`)
-        if (d.interpretation) lines.push(`  Assessment: ${d.interpretation}`)
-        if (d.plan_summary) lines.push(`  Plan: ${d.plan_summary}`)
-        return lines.join('\n')
-      }).join('\n\n')
-      parts.push(`Clinical Discussion:\n${disc}`)
+      const disc = s.clinical_discussion
+        .filter((d: any) => d && (d.issue || d.findings || d.interpretation || d.plan_summary))
+        .map((d: any) => {
+          const lines: string[] = []
+          if (d.issue) lines.push(`${d.issue}`)
+          if (d.findings) lines.push(`  Findings: ${d.findings}`)
+          if (d.interpretation) lines.push(`  Assessment: ${d.interpretation}`)
+          if (d.plan_summary) lines.push(`  Plan: ${d.plan_summary}`)
+          return lines.join('\n')
+        })
+        .filter(Boolean)
+        .join('\n\n')
+      if (disc) parts.push(`Clinical Discussion:\n${disc}`)
     }
     if (s.clinical_reasoning) parts.push(`Clinical Reasoning: ${s.clinical_reasoning}`)
   }
@@ -213,6 +218,9 @@ export const VisitDetail = () => {
   const [syncedSections, setSyncedSections] = useState<SyncStatus>({
     subjective: false, objective: false, assessment: false, plan: false
   })
+  const [collapsedSections, setCollapsedSections] = useState<Record<SoapKey, boolean>>({
+    subjective: false, objective: false, assessment: false, plan: false
+  })
   const [copiedSection, setCopiedSection] = useState<SoapKey | null>(null)
 
   // Patient summary state
@@ -267,6 +275,7 @@ export const VisitDetail = () => {
     setNote(null)
     setNoteTexts({ subjective: '', objective: '', assessment: '', plan: '' })
     setSyncedSections({ subjective: false, objective: false, assessment: false, plan: false })
+    setCollapsedSections({ subjective: false, objective: false, assessment: false, plan: false })
     setCurrentStep(0)
     setPatientSummary('')
     setSummaryEmail('')
@@ -516,7 +525,11 @@ export const VisitDetail = () => {
         {(['speak', 'summarize', 'sync'] as const).map((label, idx) => (
           <div key={label} className="flex items-center">
             <button
-              onClick={() => idx <= currentStep && setCurrentStep(idx as Step)}
+              onClick={() => {
+                // allow jumping to summarize (step 1) if a note exists, even from step 0
+                const canJump = idx <= currentStep || (idx === 1 && Boolean(note))
+                if (canJump) setCurrentStep(idx as Step)
+              }}
               className="flex flex-col items-center gap-1"
             >
               <StepCircle
@@ -525,7 +538,13 @@ export const VisitDetail = () => {
                 synced={syncedCount}
                 total={4}
               />
-              <span className={`text-xs ${idx === currentStep ? 'text-[#4ac6d6] font-medium' : idx < currentStep ? 'text-gray-500' : 'text-gray-400'}`}>
+              <span className={`text-xs ${
+                idx === currentStep
+                  ? 'text-[#4ac6d6] font-medium'
+                  : idx < currentStep || (idx === 1 && Boolean(note))
+                    ? 'text-gray-500'
+                    : 'text-gray-400'
+              }`}>
                 {label}
               </span>
             </button>
@@ -673,8 +692,12 @@ export const VisitDetail = () => {
 
             {/* SOAP Sections */}
             {note && !isGeneratingNote && soapSections.map(section => (
-              <div key={section} className="bg-white border border-[#4ac6d6] rounded-2xl p-6">
-                <div className="flex items-center justify-between mb-3">
+              <div key={section} className="bg-white border border-[#4ac6d6] rounded-2xl overflow-hidden">
+                {/* Header — always visible, click anywhere to toggle */}
+                <button
+                  onClick={() => setCollapsedSections(prev => ({ ...prev, [section]: !prev[section] }))}
+                  className="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-gray-50 transition-colors"
+                >
                   <h3 className="text-lg capitalize">{section}</h3>
                   <div className="flex items-center gap-2">
                     <AnimatePresence>
@@ -689,25 +712,48 @@ export const VisitDetail = () => {
                         </motion.span>
                       )}
                     </AnimatePresence>
-                    <button
-                      onClick={() => handleSync(section)}
-                      className={`flex items-center gap-1 px-4 py-1.5 text-white text-sm rounded-lg transition-colors ${
-                        syncedSections[section]
-                          ? 'bg-green-500 hover:bg-green-600'
-                          : 'bg-[#4ac6d6] hover:bg-[#3ab5c5]'
-                      }`}
-                    >
-                      {syncedSections[section] ? <Check size={14} /> : null}
-                      {syncedSections[section] ? 'sync again' : 'sync'}
-                    </button>
+                    <ChevronDown
+                      size={18}
+                      className={`text-gray-400 transition-transform duration-200 ${collapsedSections[section] ? '-rotate-90' : ''}`}
+                    />
                   </div>
-                </div>
-                <textarea
-                  value={noteTexts[section]}
-                  onChange={e => setNoteTexts(prev => ({ ...prev, [section]: e.target.value }))}
-                  className="w-full min-h-[200px] resize-y text-sm text-gray-700 focus:outline-none bg-transparent"
-                  placeholder={sectionPlaceholders[section]}
-                />
+                </button>
+
+                {/* Collapsible body */}
+                <AnimatePresence initial={false}>
+                  {!collapsedSections[section] && (
+                    <motion.div
+                      key="body"
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.2, ease: 'easeInOut' }}
+                      className="overflow-hidden"
+                    >
+                      <div className="px-6 pb-6 pt-1">
+                        <textarea
+                          value={noteTexts[section]}
+                          onChange={e => setNoteTexts(prev => ({ ...prev, [section]: e.target.value }))}
+                          className="w-full min-h-[200px] resize-y text-sm text-gray-700 focus:outline-none bg-transparent"
+                          placeholder={sectionPlaceholders[section]}
+                        />
+                        <div className="flex justify-end mt-3">
+                          <button
+                            onClick={e => { e.stopPropagation(); handleSync(section) }}
+                            className={`flex items-center gap-1 px-4 py-1.5 text-white text-sm rounded-lg transition-colors ${
+                              syncedSections[section]
+                                ? 'bg-green-500 hover:bg-green-600'
+                                : 'bg-[#4ac6d6] hover:bg-[#3ab5c5]'
+                            }`}
+                          >
+                            {syncedSections[section] ? <Check size={14} /> : null}
+                            {syncedSections[section] ? 'sync again' : 'sync'}
+                          </button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             ))}
 

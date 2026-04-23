@@ -109,7 +109,8 @@
       "Bash(terraform version:*)",
       "Bash(terraform plan:*)",
       "Bash(terraform apply:*)",
-      "Bash(bash:*)"
+      "Bash(bash:*)",
+      "Bash(/tmp/check_activity.py:*)"
     ]
   }
 }

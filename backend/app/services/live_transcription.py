@@ -50,14 +50,51 @@ class LiveTranscriptionSession:
 
         return int(total_elapsed - self.total_pause_duration)
 
-    def get_full_transcript(self) -> str:
-        """Combine transcript segments; prefer final, fall back to all."""
+    def get_transcript_segments(self) -> list[dict]:
+        """Return final segments with speaker data; fall back to all segments if none are final."""
         with self._lock:
-            final_texts = [seg["text"] for seg in self.transcript_buffer if seg.get("is_final") and seg.get("text")]
-            if final_texts:
-                return " ".join(final_texts)
-            # Deepgram may not send is_final before close — use all segments as fallback
-            return " ".join(seg["text"] for seg in self.transcript_buffer if seg.get("text"))
+            final_segs = [seg for seg in self.transcript_buffer if seg.get("is_final") and seg.get("text")]
+            if final_segs:
+                return final_segs
+            return [seg for seg in self.transcript_buffer if seg.get("text")]
+
+    def get_full_transcript(self) -> str:
+        """Combine transcript segments into diarized text with speaker labels.
+
+        Consecutive segments from the same speaker are grouped into a single block
+        so Claude receives a clearly attributed conversation rather than a flat paragraph.
+
+        Format:
+            [PROVIDER]: <text>
+            [PATIENT]: <text>
+        """
+        segments = self.get_transcript_segments()
+        if not segments:
+            return ""
+
+        parts: list[str] = []
+        current_speaker: str | None = None
+        current_texts: list[str] = []
+
+        for seg in segments:
+            speaker = seg.get("speaker", "provider")
+            text = seg.get("text", "").strip()
+            if not text:
+                continue
+            if speaker != current_speaker:
+                if current_texts and current_speaker is not None:
+                    label = "PROVIDER" if current_speaker == "provider" else "PATIENT"
+                    parts.append(f"[{label}]: {' '.join(current_texts)}")
+                current_speaker = speaker
+                current_texts = [text]
+            else:
+                current_texts.append(text)
+
+        if current_texts and current_speaker is not None:
+            label = "PROVIDER" if current_speaker == "provider" else "PATIENT"
+            parts.append(f"[{label}]: {' '.join(current_texts)}")
+
+        return "\n".join(parts)
 
     def add_transcript(self, data: dict) -> None:
         """Add a transcript segment (thread-safe)."""
@@ -283,7 +320,8 @@ class LiveTranscriptionService:
                 except Exception as e:
                     logger.warning(f"Error finishing Deepgram connection: {e}")
 
-            # Get final transcript
+            # Get final transcript and segments
+            transcript_segments = session.get_transcript_segments()
             full_transcript = session.get_full_transcript()
             word_count = len(full_transcript.split()) if full_transcript else 0
 
@@ -292,6 +330,7 @@ class LiveTranscriptionService:
                 "status": "completed",
                 "total_duration_seconds": session.duration_seconds,
                 "transcript": full_transcript,
+                "transcript_segments": transcript_segments,
                 "word_count": word_count,
                 "pause_count": session.pause_count,
             }
