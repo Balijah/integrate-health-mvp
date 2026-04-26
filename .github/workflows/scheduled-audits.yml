@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ github.event.inputs.audit_type == 'all' || github.event.inputs.audit_type == 'dependencies' || github.event_name == 'schedule' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -49,7 +49,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ github.event.inputs.audit_type == 'all' || github.event.inputs.audit_type == 'security' || github.event_name == 'schedule' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -79,7 +79,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ github.event.inputs.audit_type == 'all' || github.event.inputs.audit_type == 'hipaa' || github.event_name == 'schedule' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Run automated HIPAA checks
         run: |
           PASS=0; FAIL=0; WARN=0
