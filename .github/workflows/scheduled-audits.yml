@@ -1,0 +1,149 @@
+name: Scheduled Audits
+
+on:
+  schedule:
+    - cron: "0 14 * * 1"  # Every Monday 9am CST (14:00 UTC)
+  workflow_dispatch:
+    inputs:
+      audit_type:
+        description: "Which audit to run"
+        required: false
+        default: "all"
+        type: choice
+        options: [all, dependencies, security, hipaa]
+
+jobs:
+  dependency-audit:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.audit_type == 'all' || github.event.inputs.audit_type == 'dependencies' || github.event_name == 'schedule' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Python dependency scan
+        working-directory: backend
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt --format=markdown \
+            --output=../python-vulnerabilities.md || true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: npm audit
+        working-directory: frontend
+        run: |
+          npm ci --prefer-offline
+          npm audit > ../npm-audit.txt || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dependency-audit-${{ github.run_id }}
+          path: |
+            python-vulnerabilities.md
+            npm-audit.txt
+          retention-days: 30
+
+  security-scan:
+    name: Static Security Analysis
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.audit_type == 'all' || github.event.inputs.audit_type == 'security' || github.event_name == 'schedule' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Bandit scan
+        working-directory: backend
+        run: |
+          pip install bandit
+          bandit -r app/ -f markdown -o ../bandit-report.md \
+            --severity-level medium || true
+      - name: Semgrep scan
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: "p/python p/jwt p/secrets p/owasp-top-ten"
+        continue-on-error: true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: security-scan-${{ github.run_id }}
+          path: bandit-report.md
+          retention-days: 30
+      - name: Write summary
+        run: |
+          echo "## Security Scan — $(date +%Y-%m-%d)" >> $GITHUB_STEP_SUMMARY
+          [ -f bandit-report.md ] && cat bandit-report.md >> $GITHUB_STEP_SUMMARY || true
+
+  hipaa-snapshot:
+    name: HIPAA Compliance Snapshot
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.audit_type == 'all' || github.event.inputs.audit_type == 'hipaa' || github.event_name == 'schedule' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run automated HIPAA checks
+        run: |
+          PASS=0; FAIL=0; WARN=0
+          OUT="hipaa-snapshot.md"
+          echo "# HIPAA Snapshot — $(date +%Y-%m-%d)" > $OUT
+          echo "**Commit:** ${{ github.sha }}" >> $OUT
+
+          echo "" >> $OUT; echo "## Transmission Security" >> $OUT
+          if grep -r "http://" backend/app/ --include="*.py" | \
+             grep -v "localhost\|127.0.0.1\|test\|#" | \
+             grep -q "deepgram\|anthropic\|bedrock"; then
+            echo "- ❌ FAIL: Non-HTTPS external API call" >> $OUT; FAIL=$((FAIL+1))
+          else
+            echo "- ✅ PASS: No non-HTTPS external calls" >> $OUT; PASS=$((PASS+1))
+          fi
+
+          echo "" >> $OUT; echo "## PHI Protection" >> $OUT
+          if grep -rn "logger\.\(info\|debug\)\|print(" backend/app/ --include="*.py" | \
+             grep -iE "transcript|patient|diagnosis" | grep -v "#\|test" | grep -q .; then
+            echo "- ⚠️  WARN: Possible PHI in log statements — review manually" >> $OUT; WARN=$((WARN+1))
+          else
+            echo "- ✅ PASS: No obvious PHI in logs" >> $OUT; PASS=$((PASS+1))
+          fi
+
+          echo "" >> $OUT; echo "## Secrets" >> $OUT
+          if git log --all --name-only --format="" | grep -q "^\.env$"; then
+            echo "- ❌ FAIL: .env in git history" >> $OUT; FAIL=$((FAIL+1))
+          else
+            echo "- ✅ PASS: .env not in history" >> $OUT; PASS=$((PASS+1))
+          fi
+
+          echo "" >> $OUT; echo "## Authentication" >> $OUT
+          if grep -r "bcrypt\|passlib" backend/app/ --include="*.py" | grep -q "bcrypt"; then
+            echo "- ✅ PASS: bcrypt detected" >> $OUT; PASS=$((PASS+1))
+          else
+            echo "- ❌ FAIL: bcrypt not detected" >> $OUT; FAIL=$((FAIL+1))
+          fi
+
+          if grep -r "expires_delta\|JWT_EXPIRATION\|exp" backend/app/ --include="*.py" | grep -q "expires"; then
+            echo "- ✅ PASS: JWT expiration detected" >> $OUT; PASS=$((PASS+1))
+          else
+            echo "- ⚠️  WARN: JWT expiration unclear" >> $OUT; WARN=$((WARN+1))
+          fi
+
+          echo "" >> $OUT; echo "## Access Controls" >> $OUT
+          if grep -r "user_id\|current_user" backend/app/api/ --include="*.py" | grep -q "user_id"; then
+            echo "- ✅ PASS: Ownership checks detected" >> $OUT; PASS=$((PASS+1))
+          else
+            echo "- ❌ FAIL: Ownership checks not detected" >> $OUT; FAIL=$((FAIL+1))
+          fi
+
+          echo "" >> $OUT; echo "---" >> $OUT
+          echo "## Summary: ✅ $PASS passing | ❌ $FAIL failing | ⚠️ $WARN warnings" >> $OUT
+          echo "> Run \`/hipaa_audit\` in Claude Code for full manual review." >> $OUT
+
+          cat $OUT >> $GITHUB_STEP_SUMMARY
+
+          if [ $FAIL -gt 0 ]; then
+            echo "❌ $FAIL HIPAA check(s) failed"
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hipaa-snapshot-${{ github.run_id }}
+          path: hipaa-snapshot.md
+          retention-days: 90

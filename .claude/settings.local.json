@@ -112,7 +112,9 @@
       "Bash(bash:*)",
       "Bash(/tmp/check_activity.py:*)",
       "Bash(du -sh /Users/burhankhan/Documents/integrate-health-mvp/frontend/*)",
-      "Bash(du -sh /Users/burhankhan/Documents/integrate-health-mvp/terraform/*)"
+      "Bash(du -sh /Users/burhankhan/Documents/integrate-health-mvp/terraform/*)",
+      "Bash(CLAUDE_TOOL_INPUT_COMMAND=\"git status\" bash .claude/hooks/pre_deploy_guard.sh)",
+      "Bash(echo \"Exit code: $?\")"
     ]
   }
 }

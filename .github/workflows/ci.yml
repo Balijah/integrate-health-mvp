@@ -1,0 +1,109 @@
+name: CI — Test & Lint
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend (Python)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: integrate_health_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/integrate_health_test
+      APP_ENV: test
+      APP_SECRET_KEY: test-secret-key-not-real-32-chars-min
+      JWT_SECRET_KEY: test-jwt-secret-key-not-real-32-chars
+      JWT_ALGORITHM: HS256
+      JWT_EXPIRATION_HOURS: 24
+      DEEPGRAM_API_KEY: test-key
+      ANTHROPIC_API_KEY: test-key
+      UPLOAD_DIR: /tmp/test-uploads
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+      - name: Run migrations
+        working-directory: backend
+        run: alembic upgrade head
+      - name: Lint (ruff)
+        working-directory: backend
+        run: |
+          pip install ruff
+          ruff check app/ --output-format=github
+      - name: Tests
+        working-directory: backend
+        run: |
+          if [ -d "tests" ] && [ "$(find tests -name 'test_*.py' | wc -l)" -gt 0 ]; then
+            pip install pytest pytest-cov
+            pytest tests/ -v --tb=short --cov=app --cov-report=xml --cov-fail-under=50
+          else
+            echo "No test suite found — skipping. Add tests to backend/tests/ to enable coverage gating."
+          fi
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-coverage
+          path: backend/coverage.xml
+          retention-days: 7
+
+  frontend:
+    name: Frontend (TypeScript + Build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: TypeScript check
+        working-directory: frontend
+        run: npx tsc --noEmit
+      - name: Build verification
+        working-directory: frontend
+        env:
+          VITE_API_URL: https://app.integratehealth.ai/api/v1
+        run: npm run build
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/dist/
+          retention-days: 3
+
+  secret-scan:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

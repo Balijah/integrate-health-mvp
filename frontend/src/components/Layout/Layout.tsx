@@ -20,6 +20,23 @@ import { apiClient } from '../../api/client'
 import logoFullImg from '../../assets/logo-full.jpg'
 import logoIconImg from '../../assets/logo-icon.png'
 
+const VersionDisplay = () => {
+  const [version, setVersion] = useState<string>('')
+
+  useEffect(() => {
+    fetch('/version.json')
+      .then(r => r.json())
+      .then(v => setVersion(v.version))
+      .catch(() => setVersion(''))
+  }, [])
+
+  return (
+    <p className="text-xs text-gray-300 text-center pb-1">
+      {version ? `v${version}` : ''}
+    </p>
+  )
+}
+
 export interface LayoutContext {
   openNewSession: () => void
 }
@@ -237,7 +254,7 @@ export const Layout = ({
         {/* Bottom bar */}
         <div className="border-t border-gray-100 p-3 space-y-1 flex-shrink-0">
           {!sidebarCollapsed && (
-            <p className="text-xs text-gray-300 text-center pb-1">v1.00.00</p>
+            <VersionDisplay />
           )}
           <button
             onClick={() => setShowSupportModal(true)}
