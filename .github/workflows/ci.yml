@@ -62,7 +62,7 @@ jobs:
             echo "No test suite found — skipping. Add tests to backend/tests/ to enable coverage gating."
           fi
       - name: Upload coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: backend-coverage
@@ -91,7 +91,7 @@ jobs:
           VITE_API_URL: https://app.integratehealth.ai/api/v1
         run: npm run build
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: frontend-build
           path: frontend/dist/
