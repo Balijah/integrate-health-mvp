@@ -47,8 +47,8 @@ class Settings(BaseSettings):
     aws_transcribe_medical_specialty: str = "PRIMARYCARE"
 
     # AWS Bedrock (LLM for note generation)
-    bedrock_model_id: str = "anthropic.claude-3-sonnet-20240229-v1:0"
-    bedrock_max_tokens: int = 4096
+    bedrock_model_id: str = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+    bedrock_max_tokens: int = 8192
     bedrock_temperature: float = 0.3
 
     # Legacy

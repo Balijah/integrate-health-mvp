@@ -110,7 +110,9 @@
       "Bash(terraform plan:*)",
       "Bash(terraform apply:*)",
       "Bash(bash:*)",
-      "Bash(/tmp/check_activity.py:*)"
+      "Bash(/tmp/check_activity.py:*)",
+      "Bash(du -sh /Users/burhankhan/Documents/integrate-health-mvp/frontend/*)",
+      "Bash(du -sh /Users/burhankhan/Documents/integrate-health-mvp/terraform/*)"
     ]
   }
 }
