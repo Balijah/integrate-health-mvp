@@ -24,6 +24,7 @@ from app.schemas.visit import (
     VisitCreate,
     VisitListResponse,
     VisitResponse,
+    VisitSummaryResponse,
     VisitUpdate,
 )
 from app.utils.audio import (
@@ -105,19 +106,32 @@ async def list_visits(
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
 
-    # Get visits ordered by visit_date DESC
+    # Get visits ordered by visit_date DESC — explicitly exclude heavy transcript columns
     visits_query = (
-        select(Visit)
+        select(
+            Visit.id,
+            Visit.user_id,
+            Visit.patient_ref,
+            Visit.visit_date,
+            Visit.chief_complaint,
+            Visit.audio_file_path,
+            Visit.audio_duration_seconds,
+            Visit.transcription_status,
+            Visit.is_live_transcription,
+            Visit.transcription_session_id,
+            Visit.created_at,
+            Visit.updated_at,
+        )
         .where(Visit.user_id == current_user.id)
         .order_by(Visit.visit_date.desc())
         .limit(limit)
         .offset(offset)
     )
     result = await db.execute(visits_query)
-    visits = result.scalars().all()
+    visits = result.mappings().all()
 
     # Bulk-fetch notes to compute all_synced per visit
-    visit_ids = [v.id for v in visits]
+    visit_ids = [v["id"] for v in visits]
     _SOAP_SECTIONS = {"subjective", "objective", "assessment", "plan"}
     synced_map: dict = {}
     if visit_ids:
@@ -129,10 +143,24 @@ async def list_visits(
 
     items = []
     for v in visits:
-        vr = VisitResponse.model_validate(v)
-        synced = synced_map.get(v.id, {})
+        synced = synced_map.get(v["id"], {})
         all_synced = all(synced.get(s) for s in _SOAP_SECTIONS)
-        items.append(vr.model_copy(update={"all_synced": all_synced}))
+        vr = VisitSummaryResponse(
+            id=v["id"],
+            user_id=v["user_id"],
+            patient_ref=v["patient_ref"],
+            visit_date=v["visit_date"],
+            chief_complaint=v["chief_complaint"],
+            audio_file_path=v["audio_file_path"],
+            audio_duration_seconds=v["audio_duration_seconds"],
+            transcription_status=v["transcription_status"],
+            is_live_transcription=v["is_live_transcription"],
+            transcription_session_id=v["transcription_session_id"],
+            created_at=v["created_at"],
+            updated_at=v["updated_at"],
+            all_synced=all_synced,
+        )
+        items.append(vr)
 
     return VisitListResponse(
         items=items,

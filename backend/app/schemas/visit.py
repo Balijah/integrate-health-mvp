@@ -42,8 +42,28 @@ class VisitUpdate(BaseModel):
     chief_complaint: str | None = Field(None, max_length=1000)
 
 
+class VisitSummaryResponse(BaseModel):
+    """Lightweight schema for visit list — omits large transcript fields."""
+
+    id: uuid.UUID
+    user_id: uuid.UUID
+    patient_ref: str
+    visit_date: datetime
+    chief_complaint: str | None
+    audio_file_path: str | None
+    audio_duration_seconds: int | None
+    transcription_status: str
+    is_live_transcription: bool
+    transcription_session_id: uuid.UUID | None
+    all_synced: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class VisitResponse(BaseModel):
-    """Schema for visit data in responses."""
+    """Full schema for a single visit — includes transcript content."""
 
     id: uuid.UUID
     user_id: uuid.UUID
@@ -67,7 +87,7 @@ class VisitResponse(BaseModel):
 class VisitListResponse(BaseModel):
     """Schema for paginated visit list response."""
 
-    items: list[VisitResponse]
+    items: list[VisitSummaryResponse]
     total: int
     limit: int
     offset: int

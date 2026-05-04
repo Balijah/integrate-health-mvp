@@ -4,6 +4,7 @@ Note API endpoints.
 Handles SOAP note generation, retrieval, and export.
 """
 
+import asyncio
 import json
 import logging
 import uuid
@@ -98,11 +99,13 @@ async def generate_note(
         )
 
     try:
-        # Generate SOAP note
+        # Generate SOAP note — run in thread pool so the event loop stays free
+        # for ALB health checks during the long Bedrock call (prevents 504s)
         logger.info(f"Generating SOAP note for visit {visit_id}")
-        content = generate_soap_note(
-            transcript=visit.transcript,
-            additional_context=request.additional_context,
+        content = await asyncio.to_thread(
+            generate_soap_note,
+            visit.transcript,
+            request.additional_context,
         )
 
         # Create note record

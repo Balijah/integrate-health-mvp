@@ -15,14 +15,23 @@ FAILURES=0
 STAGED_PY=$(git diff --cached --name-only --diff-filter=ACM | grep "\.py$" || true)
 if [ -n "$STAGED_PY" ]; then
   echo "▶ Python lint (ruff)..."
-  if cd backend && source venv/bin/activate 2>/dev/null && \
-     echo "$STAGED_PY" | sed 's|backend/||g' | xargs ruff check 2>&1; then
-    echo "  ✅ Python lint passed"
-    cd ..
+  # Activate venv if present; fall back to system ruff if not
+  RUFF_CMD=""
+  if [ -f "backend/venv/bin/ruff" ]; then
+    RUFF_CMD="backend/venv/bin/ruff"
+  elif command -v ruff &>/dev/null; then
+    RUFF_CMD="ruff"
+  fi
+  if [ -z "$RUFF_CMD" ]; then
+    echo "  ⚠️  ruff not found — skipping Python lint"
   else
-    echo "  ❌ Ruff errors found"
-    cd ..
-    FAILURES=$((FAILURES + 1))
+    PY_FILES=$(echo "$STAGED_PY" | sed 's|backend/||g')
+    if (cd backend && echo "$PY_FILES" | xargs ../$RUFF_CMD check 2>&1); then
+      echo "  ✅ Python lint passed"
+    else
+      echo "  ❌ Ruff errors found"
+      FAILURES=$((FAILURES + 1))
+    fi
   fi
 fi
 
@@ -41,11 +50,22 @@ if [ -n "$STAGED_TS" ]; then
 fi
 
 # Secret scan on all staged files
+# Excludes: this hook script itself, instruction_files/ (docs that mention patterns)
 echo "▶ Secret scan..."
 STAGED_ALL=$(git diff --cached --name-only --diff-filter=ACM || true)
 FOUND_SECRET=false
 PATTERNS=("sk-ant-" "AKIA[A-Z0-9]{16}" "dg_" "postgres://.*:.*@.*@")
+SCAN_EXCLUDES="scripts/pre-commit.sh instruction_files/"
 for file in $STAGED_ALL; do
+  # Skip excluded paths
+  SKIP=false
+  for excl in $SCAN_EXCLUDES; do
+    if [[ "$file" == "$excl" || "$file" == "$excl"* ]]; then
+      SKIP=true; break
+    fi
+  done
+  [ "$SKIP" = true ] && continue
+
   if [ -f "$file" ]; then
     for pat in "${PATTERNS[@]}"; do
       if git diff --cached "$file" | grep -qE "$pat"; then

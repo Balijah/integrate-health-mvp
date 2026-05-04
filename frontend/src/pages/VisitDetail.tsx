@@ -7,7 +7,7 @@ import { useTranscriptionPolling } from '../hooks/useTranscriptionPolling'
 import { getVisit, updateVisit, deleteVisit, retryTranscription, VisitResponse } from '../api/visits'
 import { LiveRecorder } from '../components/LiveRecorder/LiveRecorder'
 import { TranscriptSegment } from '../hooks/useLiveTranscription'
-import { generateNote, getNote, syncSection, NoteResponse } from '../api/notes'
+import { generateNote, getNote, syncSection, deleteNote, NoteResponse } from '../api/notes'
 
 type Step = 0 | 1 | 2 // speak=0, summarize=1, sync=2
 
@@ -211,6 +211,7 @@ export const VisitDetail = () => {
     subjective: '', objective: '', assessment: '', plan: ''
   })
   const [isGeneratingNote, setIsGeneratingNote] = useState(false)
+  const [isRegenerating, setIsRegenerating] = useState(false)
   // true once the initial loadNote() attempt for this visit has completed
   const [noteLoadAttempted, setNoteLoadAttempted] = useState(false)
 
@@ -285,6 +286,7 @@ export const VisitDetail = () => {
     liveSegmentsRef.current = []
     liveLastWasInterimRef.current = false
     setNoteLoadAttempted(false)
+    setIsRegenerating(false)
     setIsLoading(true)
     getVisit(visitId)
       .then(v => {
@@ -401,6 +403,24 @@ export const VisitDetail = () => {
       await loadNote()
     } finally {
       setIsGeneratingNote(false)
+    }
+  }
+
+  const handleRegenerateNote = async () => {
+    if (!visitId || !note) return
+    setIsRegenerating(true)
+    try {
+      await deleteNote(visitId, note.id)
+      setNote(null)
+      setNoteTexts({ subjective: '', objective: '', assessment: '', plan: '' })
+      setSyncedSections({ subjective: false, objective: false, assessment: false, plan: false })
+      await generateNote(visitId)
+      await loadNote()
+    } catch {
+      // silent — loadNote will show whatever state exists
+      await loadNote()
+    } finally {
+      setIsRegenerating(false)
     }
   }
 
@@ -756,6 +776,19 @@ export const VisitDetail = () => {
                 </AnimatePresence>
               </div>
             ))}
+
+            {/* Re-generate button */}
+            {note && !isGeneratingNote && (
+              <div className="flex justify-center">
+                <button
+                  onClick={handleRegenerateNote}
+                  disabled={isRegenerating}
+                  className="text-sm text-gray-400 hover:text-[#4ac6d6] border border-gray-200 hover:border-[#4ac6d6] rounded-xl px-5 py-2 transition-colors disabled:opacity-50"
+                >
+                  {isRegenerating ? 'regenerating...' : '↺ re-generate summarization'}
+                </button>
+              </div>
+            )}
 
             {/* Patient Summary */}
             {note && !isGeneratingNote && (

@@ -14,12 +14,12 @@ from app.database import get_db
 from app.models.user import User
 from app.services.auth import decode_access_token, get_user_by_id
 
-# HTTP Bearer token security scheme
-security = HTTPBearer()
+# auto_error=False so we can raise 401 (not 403) when credentials are absent
+security = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> User:
     """
@@ -33,8 +33,15 @@ async def get_current_user(
         User: Authenticated user
 
     Raises:
-        HTTPException: 401 if token is invalid or user not found
+        HTTPException: 401 if token is missing, invalid, or user not found
     """
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     token = credentials.credentials
 
     # Decode and validate token

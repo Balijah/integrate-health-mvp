@@ -1,0 +1,15 @@
+# Gitleaks configuration for Integrate Health MVP
+# Docs: https://github.com/gitleaks/gitleaks
+
+[allowlist]
+  description = "Global allowlist"
+  paths = [
+    # Hook and CI scripts that contain pattern strings (not real secrets)
+    '''scripts/pre-commit\.sh''',
+    '''\.claude/hooks/.*\.sh''',
+    # Documentation files that reference secret patterns as examples
+    '''instruction_files/.*''',
+    # Lock files and generated dependency files
+    '''package-lock\.json''',
+    '''yarn\.lock''',
+  ]
