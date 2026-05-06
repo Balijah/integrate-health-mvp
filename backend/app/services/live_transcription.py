@@ -35,6 +35,31 @@ class LiveTranscriptionSession:
         self.total_pause_duration: float = 0.0
         self.pause_count: int = 0
         self._lock = threading.Lock()
+        self._keepalive_stop: threading.Event = threading.Event()
+        self._keepalive_thread: threading.Thread | None = None
+
+    def start_keepalive(self) -> None:
+        """Send periodic KeepAlive messages to Deepgram while paused to prevent timeout."""
+        self._keepalive_stop.clear()
+
+        def _loop():
+            while not self._keepalive_stop.wait(timeout=8):
+                try:
+                    if self.connection is not None:
+                        self.connection.keep_alive()
+                except Exception as e:
+                    logger.warning(f"KeepAlive send failed for session {self.session_id}: {e}")
+                    break
+
+        self._keepalive_thread = threading.Thread(target=_loop, daemon=True)
+        self._keepalive_thread.start()
+
+    def stop_keepalive(self) -> None:
+        """Stop the KeepAlive thread."""
+        self._keepalive_stop.set()
+        if self._keepalive_thread is not None:
+            self._keepalive_thread.join(timeout=2)
+            self._keepalive_thread = None
 
     @property
     def duration_seconds(self) -> int:
@@ -269,6 +294,7 @@ class LiveTranscriptionService:
         session.status = "paused"
         session.paused_at = datetime.utcnow()
         session.pause_count += 1
+        session.start_keepalive()
 
         logger.info(f"Session {session_id} paused")
 
@@ -290,6 +316,8 @@ class LiveTranscriptionService:
                 "status": session.status,
                 "duration_seconds": session.duration_seconds,
             }
+
+        session.stop_keepalive()
 
         if session.paused_at:
             pause_duration = (datetime.utcnow() - session.paused_at).total_seconds()
@@ -313,6 +341,8 @@ class LiveTranscriptionService:
             raise LiveTranscriptionError(f"Session {session_id} not found")
 
         try:
+            session.stop_keepalive()
+
             # Close Deepgram connection
             if session.connection:
                 try:

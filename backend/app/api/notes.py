@@ -8,11 +8,13 @@ import asyncio
 import json
 import logging
 import uuid
+from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession
+from app.config import get_settings
 from app.models.note import Note
 from app.models.visit import Visit
 from app.schemas.note import (
@@ -26,7 +28,6 @@ from app.schemas.note import (
     SyncSectionResponse,
 )
 from app.services.note_generation import (
-    NoteGenerationError,
     generate_soap_note,
     format_note_as_markdown,
     format_note_as_text,
@@ -35,6 +36,47 @@ from app.services.note_generation import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+async def _run_note_generation(
+    note_id: str, transcript: str, additional_context: str, database_url: str
+) -> None:
+    """Background task: run Bedrock generation and update the note record."""
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+
+    engine = create_async_engine(database_url)
+    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    try:
+        content = await asyncio.wait_for(
+            asyncio.to_thread(generate_soap_note, transcript, additional_context),
+            timeout=180.0,
+        )
+        new_status = "draft"
+    except asyncio.TimeoutError:
+        logger.error(f"Note generation timed out after 180s for note {note_id}")
+        content = {}
+        new_status = "failed"
+    except BaseException as e:
+        logger.error(f"Background note generation failed for note {note_id}: {type(e).__name__}: {e}")
+        content = {}
+        new_status = "failed"
+
+    try:
+        async with session_factory() as session:
+            async with session.begin():
+                result = await session.execute(
+                    select(Note).where(Note.id == uuid.UUID(note_id)).limit(1)
+                )
+                note = result.scalar_one_or_none()
+                if note:
+                    note.content = content
+                    note.status = new_status
+                    logger.info(f"Note {note_id} updated to status={new_status}")
+    except Exception as e:
+        logger.error(f"Failed to persist note {note_id} after generation: {e}")
+    finally:
+        await engine.dispose()
 
 
 @router.post(
@@ -49,6 +91,7 @@ async def generate_note(
     request: GenerateNoteRequest,
     current_user: CurrentUser,
     db: DbSession,
+    background_tasks: BackgroundTasks,
 ) -> GenerateNoteResponse:
     """
     Generate a SOAP note for a visit.
@@ -90,51 +133,75 @@ async def generate_note(
 
     # Check if note already exists
     existing_note = await db.execute(
-        select(Note).where(Note.visit_id == visit_id)
+        select(Note).where(Note.visit_id == visit_id).limit(1)
     )
-    if existing_note.scalar_one_or_none():
+    existing = existing_note.scalar_one_or_none()
+
+    settings = get_settings()
+
+    if existing:
+        if existing.status == "generating":
+            # Idempotent: a generation is already in progress — return the same note
+            return GenerateNoteResponse(
+                note_id=existing.id,
+                visit_id=visit_id,
+                status="generating",
+                message="Note generation already in progress",
+            )
+        if existing.status == "failed":
+            # Reset the failed note and re-queue generation so "Try Again" works
+            existing.content = {}
+            existing.status = "generating"
+            await db.flush()
+            background_tasks.add_task(
+                _run_note_generation,
+                str(existing.id),
+                visit.transcript,
+                request.additional_context or "",
+                settings.database_url,
+            )
+            logger.info(f"Note {existing.id} reset to generating, background task re-queued")
+            return GenerateNoteResponse(
+                note_id=existing.id,
+                visit_id=visit_id,
+                status="generating",
+                message="Note generation restarted",
+            )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Note already exists for this visit. Delete it first to regenerate.",
         )
 
-    try:
-        # Generate SOAP note — run in thread pool so the event loop stays free
-        # for ALB health checks during the long Bedrock call (prevents 504s)
-        logger.info(f"Generating SOAP note for visit {visit_id}")
-        content = await asyncio.to_thread(
-            generate_soap_note,
-            visit.transcript,
-            request.additional_context,
-        )
+    # Create note immediately with 'generating' status — returns in milliseconds
+    # so CloudFront's 60s origin timeout is never hit
+    logger.info(f"Queuing background SOAP note generation for visit {visit_id}")
 
-        # Create note record
-        note = Note(
-            visit_id=visit_id,
-            content=content,
-            note_type="soap",
-            status="draft",
-        )
+    note = Note(
+        visit_id=visit_id,
+        content={},
+        note_type="soap",
+        status="generating",
+    )
+    db.add(note)
+    await db.flush()
+    await db.refresh(note)
 
-        db.add(note)
-        await db.flush()
-        await db.refresh(note)
+    background_tasks.add_task(
+        _run_note_generation,
+        str(note.id),
+        visit.transcript,
+        request.additional_context or "",
+        settings.database_url,
+    )
 
-        logger.info(f"SOAP note created: {note.id}")
+    logger.info(f"Note {note.id} created with status=generating, background task queued")
 
-        return GenerateNoteResponse(
-            note_id=note.id,
-            visit_id=visit_id,
-            status="draft",
-            message="SOAP note generated successfully",
-        )
-
-    except NoteGenerationError as e:
-        logger.error(f"Note generation failed for visit {visit_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
-        )
+    return GenerateNoteResponse(
+        note_id=note.id,
+        visit_id=visit_id,
+        status="generating",
+        message="Note generation started",
+    )
 
 
 @router.get(
@@ -177,12 +244,21 @@ async def get_note(
 
     # Get note
     result = await db.execute(
-        select(Note).where(Note.visit_id == visit_id)
+        select(Note).where(Note.visit_id == visit_id).limit(1)
     )
     note = result.scalar_one_or_none()
 
     if note is None:
         return None
+
+    # Auto-fail notes stuck in "generating" for more than 10 minutes — these were
+    # likely orphaned by a service restart that killed their background task
+    if note.status == "generating" and note.created_at is not None:
+        age = datetime.now(timezone.utc) - note.created_at.replace(tzinfo=timezone.utc)
+        if age > timedelta(minutes=10):
+            logger.warning(f"Note {note.id} stuck in generating for {age} — marking as failed")
+            note.status = "failed"
+            await db.flush()
 
     return NoteResponse.model_validate(note)
 

@@ -301,9 +301,9 @@ def _get_bedrock_client():
     from botocore.config import Config
     settings = get_settings()
     config = Config(
-        read_timeout=300,    # 5 minutes — long transcripts can take 60-120s on Sonnet 4.5
+        read_timeout=120,    # 2 minutes — fail fast so background task can mark note as failed
         connect_timeout=10,
-        retries={"max_attempts": 2},
+        retries={"max_attempts": 1},
     )
     return boto3.client("bedrock-runtime", region_name=settings.aws_region, config=config)
 
@@ -458,6 +458,16 @@ def generate_soap_note(transcript: str, additional_context: str = "") -> dict:
             logger.error(f"[BEDROCK] Failed to parse response as JSON (length={len(response_text)}): {e}")
             logger.error(f"[BEDROCK RAW UNPARSEABLE RESPONSE]\n{response_text}")
             raise NoteGenerationError(f"Failed to parse generated note: {str(e)}")
+
+        # Validate that at least one SOAP section is present
+        soap_keys = {"subjective", "objective", "assessment", "plan"}
+        if not soap_keys.intersection(soap_content.keys()):
+            logger.error(f"[BEDROCK] Response has no SOAP sections. Keys={list(soap_content.keys())}")
+            logger.error(f"[BEDROCK RAW EMPTY RESPONSE]\n{response_text}")
+            raise NoteGenerationError(
+                "The transcript did not contain enough clinical content to generate a note. "
+                "Please record a visit with clinical details and try again."
+            )
 
         # Add metadata including token usage
         soap_content["metadata"] = {

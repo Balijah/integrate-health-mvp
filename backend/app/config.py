@@ -48,11 +48,17 @@ class Settings(BaseSettings):
 
     # AWS Bedrock (LLM for note generation)
     bedrock_model_id: str = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
-    bedrock_max_tokens: int = 8192
+    bedrock_max_tokens: int = 16384
     bedrock_temperature: float = 0.3
 
     # Legacy
     anthropic_api_key: str = ""
+
+    # Email (AWS SES)
+    ses_from_email: str = "noreply@integratehealth.ai"
+    frontend_url: str = "https://app.integratehealth.ai"
+    # Backend base URL used to construct WebSocket URLs returned in API responses
+    backend_url: str = "https://app.integratehealth.ai"
 
     # Storage Mode: "local" for local filesystem, "s3" for AWS S3
     storage_mode: str = "local"

@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession
+from app.config import get_settings
 from app.models.visit import Visit
 from app.models.transcription_session import TranscriptionSession
 from app.services.transcription import TranscriptionError, transcribe_audio_file
@@ -507,7 +508,7 @@ async def start_live_transcription(
 
     return StartLiveTranscriptionResponse(
         session_id=session_id,
-        websocket_url=f"ws://localhost:8000/ws/transcription/{session_id}",
+        websocket_url=f"{get_settings().backend_url.rstrip('/').replace('https://', 'wss://').replace('http://', 'ws://')}/ws/transcription/{session_id}",
         status="active",
     )
 

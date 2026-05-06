@@ -5,7 +5,6 @@ Handles profile picture upload and profile updates.
 """
 
 import logging
-import uuid
 import os
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, status
@@ -41,9 +40,9 @@ class ProfileResponse(BaseModel):
     description="Upload a profile picture for the current user.",
 )
 async def upload_profile_picture(
+    current_user: CurrentUser,
+    db: DbSession,
     file: UploadFile = File(...),
-    current_user: CurrentUser = None,
-    db: DbSession = None,
 ) -> ProfileResponse:
     """Upload a profile picture. Stores in S3 or local uploads directory."""
     
@@ -51,7 +50,7 @@ async def upload_profile_picture(
     if file.content_type not in ALLOWED_IMAGE_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid file type. Allowed: JPEG, PNG, WebP, GIF",
+            detail="Invalid file type. Allowed: JPEG, PNG, WebP, GIF",
         )
     
     # Read and validate size

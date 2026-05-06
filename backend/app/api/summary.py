@@ -4,10 +4,11 @@ Patient Summary send endpoint.
 Sends ONLY the patient summary content to the specified email.
 """
 
+import html
 import logging
 import uuid
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter
 from pydantic import BaseModel, EmailStr
 
 from app.api.deps import CurrentUser, DbSession
@@ -67,7 +68,7 @@ async def send_summary(
                 <h2 style="color: white; margin: 0;">Your Visit Summary</h2>
             </div>
             <div style="padding: 24px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 0 0 12px 12px;">
-                <p style="color: #374151; line-height: 1.6;">{request.summary}</p>
+                <p style="color: #374151; line-height: 1.6;">{html.escape(request.summary)}</p>
                 <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
                 <p style="color: #9ca3af; font-size: 12px; font-style: italic;">
                     This summary was prepared by {provider_name} using Integrate Health.

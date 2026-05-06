@@ -9,9 +9,8 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, status
 from jose import jwt, JWTError
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import DbSession
 from app.config import get_settings
@@ -64,7 +63,7 @@ class ForgotPasswordResponse(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
     token: str
-    new_password: str
+    new_password: str = Field(min_length=8, max_length=128)
 
 
 class ResetPasswordResponse(BaseModel):
@@ -86,21 +85,21 @@ async def forgot_password(
     Always returns success to prevent email enumeration.
     """
     result = await db.execute(
-        select(User).where(User.email == request.email, User.is_active == True)
+        select(User).where(User.email == request.email, User.is_active)
     )
     user = result.scalar_one_or_none()
     
     if user is not None:
         reset_token = create_reset_token(str(user.id), user.email)
-        reset_url = f"https://app.integratehealth.ai/reset-password?token={reset_token}"
-        
+        reset_url = f"{settings.frontend_url}/reset-password?token={reset_token}"
+
         logger.info(f"Password reset requested for {request.email}")
-        
+
         # Try to send via SES
         try:
             import boto3
-            ses = boto3.client("ses", region_name="us-east-1")
-            
+            ses = boto3.client("ses", region_name=settings.aws_region)
+
             body_html = f"""
             <html>
             <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -116,9 +115,9 @@ async def forgot_password(
             </body>
             </html>
             """
-            
+
             ses.send_email(
-                Source="noreply@integratehealth.ai",
+                Source=settings.ses_from_email,
                 Destination={"ToAddresses": [request.email]},
                 Message={
                     "Subject": {"Data": "Reset your Integrate Health password"},
@@ -130,8 +129,8 @@ async def forgot_password(
             )
             logger.info(f"Password reset email sent to {request.email}")
         except Exception as e:
-            logger.warning(f"Could not send reset email via SES: {e}")
-            logger.info(f"Reset URL (for manual delivery): {reset_url}")
+            logger.error(f"Failed to send password reset email via SES: {type(e).__name__}: {e}")
+            logger.info(f"Reset URL (dev fallback): {reset_url}")
     else:
         logger.info(f"Password reset requested for non-existent email: {request.email}")
     
@@ -162,7 +161,7 @@ async def reset_password(
     
     user_id = payload["sub"]
     result = await db.execute(
-        select(User).where(User.id == user_id, User.is_active == True)
+        select(User).where(User.id == user_id, User.is_active)
     )
     user = result.scalar_one_or_none()
     
@@ -171,11 +170,22 @@ async def reset_password(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found.",
         )
-    
+
+    # Reject token if password was already changed after this token was issued
+    token_iat = payload.get("iat", 0)
+    if user.password_changed_at is not None:
+        if token_iat < user.password_changed_at.timestamp():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid or expired reset token. Please request a new reset link.",
+            )
+
     # Update password
+    now = datetime.now(timezone.utc)
     user.hashed_password = hash_password(request.new_password)
+    user.password_changed_at = now
     await db.flush()
-    
+
     logger.info(f"Password reset completed for {user.email}")
-    
+
     return ResetPasswordResponse(message="Password has been reset successfully. You can now log in.")
