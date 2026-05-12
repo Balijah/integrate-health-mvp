@@ -5,10 +5,10 @@ Routes contact support submissions to founder emails.
 """
 
 import logging
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter
 from pydantic import BaseModel
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import CurrentUser
 
 logger = logging.getLogger(__name__)
 

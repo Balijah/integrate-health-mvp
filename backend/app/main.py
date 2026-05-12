@@ -4,13 +4,20 @@ FastAPI application entry point.
 Configures the app with CORS, routes, and health check endpoint.
 """
 
-from fastapi import FastAPI, Request
+import logging
+
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from app.config import get_settings
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(name)s %(levelname)s %(message)s",
+)
 
 settings = get_settings()
 
@@ -77,8 +84,8 @@ async def root() -> dict:
     }
 
 
-# API routes
-from app.api import auth, visits, transcription, notes, websockets, support, summary, password_reset, profile
+# API routes — imported here (after app creation) to avoid circular imports
+from app.api import auth, visits, transcription, notes, websockets, support, summary, password_reset, profile  # noqa: E402
 
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(visits.router, prefix="/api/v1/visits", tags=["visits"])

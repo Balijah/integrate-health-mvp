@@ -114,7 +114,20 @@
       "Bash(du -sh /Users/burhankhan/Documents/integrate-health-mvp/frontend/*)",
       "Bash(du -sh /Users/burhankhan/Documents/integrate-health-mvp/terraform/*)",
       "Bash(CLAUDE_TOOL_INPUT_COMMAND=\"git status\" bash .claude/hooks/pre_deploy_guard.sh)",
-      "Bash(echo \"Exit code: $?\")"
+      "Bash(echo \"Exit code: $?\")",
+      "Bash(__NEW_LINE_ae6f5a89469ff4dd__ aws:*)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(ruff check *)",
+      "Bash(dig TXT _dmarc.integratehealth.ai +short)",
+      "Bash(dig TXT _amazonses.integratehealth.ai +short)",
+      "Bash(pip3 --version)",
+      "Bash(pip3 install *)",
+      "Bash(pytest tests/ -v --tb=short)",
+      "Bash(git -C /Users/burhankhan/Documents/integrate-health-mvp log --oneline -10)",
+      "Bash(git -C /Users/burhankhan/Documents/integrate-health-mvp diff 022352b~1..022352b --name-only)",
+      "Bash(git -C /Users/burhankhan/Documents/integrate-health-mvp diff 68c7e96~1..68c7e96 --name-only)",
+      "Bash(git -C /Users/burhankhan/Documents/integrate-health-mvp diff 403b67b~1..403b67b --name-only)",
+      "Bash(git -C /Users/burhankhan/Documents/integrate-health-mvp show 022352b --stat)"
     ]
   }
 }

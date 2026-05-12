@@ -60,6 +60,11 @@ class User(Base):
         nullable=True,
         default=None,
     )
+    password_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+    )
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
@@ -76,7 +81,7 @@ class User(Base):
     )
 
     # Relationships
-    visits: Mapped[list["Visit"]] = relationship(
+    visits: Mapped[list["Visit"]] = relationship(  # noqa: F821
         "Visit",
         back_populates="user",
         cascade="all, delete-orphan",

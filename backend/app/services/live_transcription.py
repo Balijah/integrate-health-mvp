@@ -37,6 +37,7 @@ class LiveTranscriptionSession:
         self._lock = threading.Lock()
         self._keepalive_stop: threading.Event = threading.Event()
         self._keepalive_thread: threading.Thread | None = None
+        self._connection_alive: bool = True
 
     def start_keepalive(self) -> None:
         """Send periodic KeepAlive messages to Deepgram while paused to prevent timeout."""
@@ -44,6 +45,8 @@ class LiveTranscriptionSession:
 
         def _loop():
             while not self._keepalive_stop.wait(timeout=8):
+                if not self._connection_alive:
+                    break
                 try:
                     if self.connection is not None:
                         self.connection.keep_alive()
@@ -222,6 +225,12 @@ class LiveTranscriptionService:
 
         def on_close(self_dg, close, **kwargs):
             logger.info(f"Deepgram connection closed for session {session_id}")
+            session._connection_alive = False
+            session.stop_keepalive()
+            session.message_queue.put({
+                "type": "connection_closed",
+                "message": "Deepgram connection closed — session ended",
+            })
 
         dg_connection.on(LiveTranscriptionEvents.Transcript, on_transcript)
         dg_connection.on(LiveTranscriptionEvents.Error, on_error)

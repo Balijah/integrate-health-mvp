@@ -59,7 +59,7 @@ export interface NoteResponse {
   visit_id: string
   content: SOAPContent
   note_type: string
-  status: 'draft' | 'reviewed' | 'finalized'
+  status: 'draft' | 'reviewed' | 'finalized' | 'generating' | 'failed'
   synced_sections: Record<string, boolean>
   all_synced: boolean
   created_at: string
@@ -96,7 +96,7 @@ export interface GenerateNoteResponse {
  */
 export interface NoteUpdateRequest {
   content?: SOAPContent
-  status?: 'draft' | 'reviewed' | 'finalized'
+  status?: 'draft' | 'reviewed' | 'finalized' | 'generating' | 'failed'
 }
 
 /**

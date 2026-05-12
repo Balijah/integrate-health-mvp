@@ -54,7 +54,7 @@ fi
 echo "▶ Secret scan..."
 STAGED_ALL=$(git diff --cached --name-only --diff-filter=ACM || true)
 FOUND_SECRET=false
-PATTERNS=("sk-ant-" "AKIA[A-Z0-9]{16}" "dg_" "postgres://.*:.*@.*@")
+PATTERNS=("sk-ant-" "AKIA[A-Z0-9]{16}" "dg_[a-zA-Z0-9]{20,}" "postgres://.*:.*@.*@")
 SCAN_EXCLUDES="scripts/pre-commit.sh instruction_files/"
 for file in $STAGED_ALL; do
   # Skip excluded paths

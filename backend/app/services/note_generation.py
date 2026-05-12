@@ -78,7 +78,9 @@ History of Present Illness:
 - Preserve important anecdotal details if they illustrate severity or clinical relevance.
 
 Review of Systems:
-- Must be structured by body system when symptoms are discussed.
+- Must be returned as a single plain string, not a JSON object.
+- Format as "System: findings" entries separated by newlines (e.g., "Constitutional: fatigue\nNeurological: headaches").
+- Structure by body system when symptoms are discussed.
 - Include both positives and clinically relevant negatives when mentioned.
 - Use categories such as:
   constitutional, neurological, cardiovascular, respiratory, gastrointestinal, genitourinary, musculoskeletal, skin, psychiatric, endocrine, sleep, HEENT.
@@ -218,7 +220,7 @@ Before responding, verify:
 
 - The note captures all clinically relevant details from the transcript.
 - The HPI is detailed enough to preserve the patient story.
-- ROS is structured by system.
+- ROS is a single plain string (not a JSON object) organized by body system.
 - Relevant history and trends are included when present.
 - Key clinical signals are clearly visible.
 - Labs and historical values are preserved when mentioned.
@@ -301,11 +303,24 @@ def _get_bedrock_client():
     from botocore.config import Config
     settings = get_settings()
     config = Config(
-        read_timeout=120,    # 2 minutes — fail fast so background task can mark note as failed
+        read_timeout=300,    # 5 minutes — long transcripts can take 2-3 min on cross-region inference
         connect_timeout=10,
         retries={"max_attempts": 1},
     )
     return boto3.client("bedrock-runtime", region_name=settings.aws_region, config=config)
+
+
+def _normalize_ros(value) -> str:
+    """Convert a ROS dict (returned by Bedrock) to a plain readable string."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        parts = []
+        for system, text in value.items():
+            label = system.replace("_", " ").title()
+            parts.append(f"{label}: {text}")
+        return "\n".join(parts)
+    return str(value)
 
 
 def _extract_json_from_response(response_text: str) -> dict:
@@ -458,6 +473,11 @@ def generate_soap_note(transcript: str, additional_context: str = "") -> dict:
             logger.error(f"[BEDROCK] Failed to parse response as JSON (length={len(response_text)}): {e}")
             logger.error(f"[BEDROCK RAW UNPARSEABLE RESPONSE]\n{response_text}")
             raise NoteGenerationError(f"Failed to parse generated note: {str(e)}")
+
+        # Coerce review_of_systems to a string if Bedrock returned a dict
+        subj = soap_content.get("subjective")
+        if isinstance(subj, dict) and isinstance(subj.get("review_of_systems"), dict):
+            subj["review_of_systems"] = _normalize_ros(subj["review_of_systems"])
 
         # Validate that at least one SOAP section is present
         soap_keys = {"subjective", "objective", "assessment", "plan"}

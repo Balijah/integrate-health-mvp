@@ -50,7 +50,7 @@ async def _run_note_generation(
     try:
         content = await asyncio.wait_for(
             asyncio.to_thread(generate_soap_note, transcript, additional_context),
-            timeout=180.0,
+            timeout=360.0,
         )
         new_status = "draft"
     except asyncio.TimeoutError:
@@ -174,7 +174,10 @@ async def generate_note(
 
     # Create note immediately with 'generating' status — returns in milliseconds
     # so CloudFront's 60s origin timeout is never hit
-    logger.info(f"Queuing background SOAP note generation for visit {visit_id}")
+    logger.info(
+        f"Queuing background SOAP note generation for visit {visit_id} "
+        f"transcript_chars={len(visit.transcript)} user_id={current_user.id}"
+    )
 
     note = Note(
         visit_id=visit_id,
@@ -255,7 +258,7 @@ async def get_note(
     # likely orphaned by a service restart that killed their background task
     if note.status == "generating" and note.created_at is not None:
         age = datetime.now(timezone.utc) - note.created_at.replace(tzinfo=timezone.utc)
-        if age > timedelta(minutes=10):
+        if age > timedelta(minutes=15):
             logger.warning(f"Note {note.id} stuck in generating for {age} — marking as failed")
             note.status = "failed"
             await db.flush()

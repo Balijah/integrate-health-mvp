@@ -112,6 +112,9 @@ async def transcription_websocket(
                 for msg in messages:
                     try:
                         await websocket.send_json(msg)
+                        if msg.get("type") == "connection_closed":
+                            await websocket.close(code=1001)
+                            return
                     except Exception as e:
                         logger.error(f"Error sending message to WebSocket: {e}")
                         return

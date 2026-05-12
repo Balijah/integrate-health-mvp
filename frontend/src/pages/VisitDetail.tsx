@@ -212,6 +212,7 @@ export const VisitDetail = () => {
   })
   const [isGeneratingNote, setIsGeneratingNote] = useState(false)
   const [isRegenerating, setIsRegenerating] = useState(false)
+  const isRegeneratingRef = useRef(false)
   // true once the initial loadNote() attempt for this visit has completed
   const [noteLoadAttempted, setNoteLoadAttempted] = useState(false)
 
@@ -333,6 +334,57 @@ export const VisitDetail = () => {
     loadNote()
   }, [loadNote])
 
+  // Poll every 3s while note generation is running in the background.
+  // Stop after 200 polls (~10 min) — notes stuck longer were orphaned by a restart.
+  const notePollingCount = useRef(0)
+  useEffect(() => {
+    if (!visitId || note?.status !== 'generating') {
+      notePollingCount.current = 0
+      return
+    }
+    const interval = setInterval(async () => {
+      notePollingCount.current += 1
+      if (notePollingCount.current > 200) {
+        // Force a final fetch; backend will auto-fail it if truly orphaned
+        try {
+          const n = await getNote(visitId)
+          if (n) {
+            setNote(n)
+            if (n.status !== 'generating') {
+              setNoteTexts({
+                subjective: sectionToText('subjective', n.content),
+                objective: sectionToText('objective', n.content),
+                assessment: sectionToText('assessment', n.content),
+                plan: sectionToText('plan', n.content),
+              })
+            }
+          }
+        } catch { /* ignore */ }
+        clearInterval(interval)
+        return
+      }
+      try {
+        const n = await getNote(visitId)
+        if (n && n.status !== 'generating') {
+          setNote(n)
+          setNoteTexts({
+            subjective: sectionToText('subjective', n.content),
+            objective: sectionToText('objective', n.content),
+            assessment: sectionToText('assessment', n.content),
+            plan: sectionToText('plan', n.content),
+          })
+          setSyncedSections({
+            subjective: Boolean(n.synced_sections?.subjective),
+            objective: Boolean(n.synced_sections?.objective),
+            assessment: Boolean(n.synced_sections?.assessment),
+            plan: Boolean(n.synced_sections?.plan),
+          })
+        }
+      } catch { /* ignore */ }
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [note?.status, visitId])
+
   const handleRetryTranscription = async () => {
     if (!visitId) return
     setIsRetrying(true)
@@ -364,7 +416,7 @@ export const VisitDetail = () => {
   // Step 2: auto-generate note if transcript ready but no note
   // Waits for noteLoadAttempted to avoid racing with the initial loadNote() call
   useEffect(() => {
-    if (currentStep === 1 && !note && !isGeneratingNote && noteLoadAttempted) {
+    if (currentStep === 1 && !note && !isGeneratingNote && !isRegenerating && noteLoadAttempted) {
       const batchReady = visit?.transcription_status === 'completed' && Boolean(visit?.transcript)
       if (batchReady || liveRecordingDone) {
         handleGenerateNote()
@@ -407,7 +459,8 @@ export const VisitDetail = () => {
   }
 
   const handleRegenerateNote = async () => {
-    if (!visitId || !note) return
+    if (!visitId || !note || isRegeneratingRef.current) return
+    isRegeneratingRef.current = true
     setIsRegenerating(true)
     try {
       await deleteNote(visitId, note.id)
@@ -420,6 +473,7 @@ export const VisitDetail = () => {
       // silent — loadNote will show whatever state exists
       await loadNote()
     } finally {
+      isRegeneratingRef.current = false
       setIsRegenerating(false)
     }
   }
@@ -668,14 +722,14 @@ export const VisitDetail = () => {
             exit={{ opacity: 0, y: -10 }}
             className="space-y-4"
           >
-            {isGeneratingNote && (
+            {(isGeneratingNote || note?.status === 'generating') && (
               <div className="text-center py-8">
                 <div className="w-8 h-8 animate-spin rounded-full border-4 border-[#4ac6d6] border-t-transparent mx-auto mb-3" />
                 <p className="text-gray-600 italic">Generating SOAP note...</p>
               </div>
             )}
 
-            {!isGeneratingNote && !note && (
+            {!isGeneratingNote && note?.status !== 'generating' && !note && (
               <div className="text-center py-8">
                 {visit.transcription_status === 'failed' ? (
                   <>
@@ -710,8 +764,22 @@ export const VisitDetail = () => {
               </div>
             )}
 
+            {/* Failed state */}
+            {note?.status === 'failed' && !isGeneratingNote && (
+              <div className="text-center py-8">
+                <p className="text-red-500 italic mb-4">Note generation failed. Please try again.</p>
+                <button
+                  onClick={handleRegenerateNote}
+                  disabled={isRegenerating}
+                  className="bg-[#4ac6d6] text-gray-900 rounded-xl px-8 py-3 hover:bg-[#3ab5c5] transition-colors disabled:opacity-50"
+                >
+                  {isRegenerating ? 'retrying...' : 'Try Again'}
+                </button>
+              </div>
+            )}
+
             {/* SOAP Sections */}
-            {note && !isGeneratingNote && soapSections.map(section => (
+            {note?.status === 'draft' && !isGeneratingNote && soapSections.map(section => (
               <div key={section} className="bg-white border border-[#4ac6d6] rounded-2xl overflow-hidden">
                 {/* Header — always visible, click anywhere to toggle */}
                 <button
@@ -778,7 +846,7 @@ export const VisitDetail = () => {
             ))}
 
             {/* Re-generate button */}
-            {note && !isGeneratingNote && (
+            {note?.status === 'draft' && !isGeneratingNote && (
               <div className="flex justify-center">
                 <button
                   onClick={handleRegenerateNote}
@@ -791,7 +859,7 @@ export const VisitDetail = () => {
             )}
 
             {/* Patient Summary */}
-            {note && !isGeneratingNote && (
+            {note?.status === 'draft' && !isGeneratingNote && (
               <div className="bg-white border border-[#4ac6d6] rounded-2xl p-6">
                 <h3 className="text-lg mb-4">Patient Summary</h3>
                 <textarea

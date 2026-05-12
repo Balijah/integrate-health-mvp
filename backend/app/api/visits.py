@@ -211,7 +211,7 @@ async def get_visit(
 
     _SOAP_SECTIONS = {"subjective", "objective", "assessment", "plan"}
     note_result = await db.execute(
-        select(Note.synced_sections).where(Note.visit_id == visit_id)
+        select(Note.synced_sections).where(Note.visit_id == visit_id).limit(1)
     )
     synced = note_result.scalar_one_or_none() or {}
     all_synced = all(synced.get(s) for s in _SOAP_SECTIONS)
