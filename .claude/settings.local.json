@@ -127,7 +127,18 @@
       "Bash(git -C /Users/burhankhan/Documents/integrate-health-mvp diff 022352b~1..022352b --name-only)",
       "Bash(git -C /Users/burhankhan/Documents/integrate-health-mvp diff 68c7e96~1..68c7e96 --name-only)",
       "Bash(git -C /Users/burhankhan/Documents/integrate-health-mvp diff 403b67b~1..403b67b --name-only)",
-      "Bash(git -C /Users/burhankhan/Documents/integrate-health-mvp show 022352b --stat)"
+      "Bash(git -C /Users/burhankhan/Documents/integrate-health-mvp show 022352b --stat)",
+      "Bash(pg_isready -h localhost -p 5432)",
+      "Bash(nc -zv integrate-health-db.cg7ca68eso1y.us-east-1.rds.amazonaws.com 5432)",
+      "Bash(venv/bin/python3 -m py_compile app/services/live_transcription.py app/api/websockets.py app/services/note_generation.py)",
+      "Bash(venv/bin/python3 -m pytest tests/ -v --no-header -q)",
+      "Bash(pytest --version)",
+      "Bash(pip show *)",
+      "Bash(pytest tests/ -v --no-header)",
+      "Bash(pip install *)",
+      "Bash(gh workflow *)",
+      "Bash(brew list *)",
+      "Read(//usr/local/bin/**)"
     ]
   }
 }

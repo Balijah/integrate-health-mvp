@@ -323,6 +323,65 @@ def _normalize_ros(value) -> str:
     return str(value)
 
 
+def _coerce_to_list(val, section: str, field: str):
+    """Ensure val is a list; wrap strings in a list and log a warning when coercing."""
+    if val is None:
+        return val
+    if isinstance(val, list):
+        return val
+    if isinstance(val, str) and val.strip():
+        logger.warning(
+            f"[SOAP COERCE] {section}.{field}: expected list, got 'str' — wrapping. "
+            f"Value snippet: {val[:120]!r}"
+        )
+        return [val.strip()]
+    logger.warning(
+        f"[SOAP COERCE] {section}.{field}: expected list, got {type(val).__name__!r} — resetting to []. "
+        f"Value: {str(val)[:120]!r}"
+    )
+    return []
+
+
+def _normalize_soap_content(content: dict) -> dict:
+    """
+    Coerce AI-generated SOAP content to consistent field types.
+
+    The model occasionally returns array fields as strings (e.g. allergies as a
+    narrative string). This corrects those type mismatches before the note is
+    saved, so the frontend always receives predictable types.
+    """
+    subj = content.get("subjective")
+    if isinstance(subj, dict):
+        for field in ("allergies", "current_medications", "current_supplements"):
+            if field in subj:
+                subj[field] = _coerce_to_list(subj[field], "subjective", field)
+
+    assess = content.get("assessment")
+    if isinstance(assess, dict):
+        if "diagnoses" in assess:
+            assess["diagnoses"] = _coerce_to_list(assess["diagnoses"], "assessment", "diagnoses")
+
+    plan = content.get("plan")
+    if isinstance(plan, dict):
+        for field in ("lab_orders", "imaging_or_referrals"):
+            if field in plan:
+                plan[field] = _coerce_to_list(plan[field], "plan", field)
+
+        rx = plan.get("prescriptions")
+        if isinstance(rx, dict):
+            for sub in ("add", "continue", "discontinue"):
+                if sub in rx:
+                    rx[sub] = _coerce_to_list(rx[sub], "plan.prescriptions", sub)
+
+        supps = plan.get("supplements")
+        if isinstance(supps, dict) and any(k in supps for k in ("add", "continue", "discontinue")):
+            for sub in ("add", "continue", "discontinue"):
+                if sub in supps:
+                    supps[sub] = _coerce_to_list(supps[sub], "plan.supplements", sub)
+
+    return content
+
+
 def _extract_json_from_response(response_text: str) -> dict:
     """
     Extract JSON from Claude's response, handling various formats.
@@ -478,6 +537,9 @@ def generate_soap_note(transcript: str, additional_context: str = "") -> dict:
         subj = soap_content.get("subjective")
         if isinstance(subj, dict) and isinstance(subj.get("review_of_systems"), dict):
             subj["review_of_systems"] = _normalize_ros(subj["review_of_systems"])
+
+        # Coerce all array fields to lists (model occasionally returns strings)
+        soap_content = _normalize_soap_content(soap_content)
 
         # Validate that at least one SOAP section is present
         soap_keys = {"subjective", "objective", "assessment", "plan"}
