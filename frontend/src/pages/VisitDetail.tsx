@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Check, Trash2, Printer, Send, ChevronDown } from 'lucide-react'
+import { Check, Trash2, Printer, Send, ChevronDown, RotateCcw } from 'lucide-react'
 
 import { useTranscriptionPolling } from '../hooks/useTranscriptionPolling'
 import { getVisit, updateVisit, deleteVisit, retryTranscription, VisitResponse } from '../api/visits'
@@ -255,6 +255,22 @@ export const VisitDetail = () => {
     subjective: false, objective: false, assessment: false, plan: false
   })
   const [copiedSection, setCopiedSection] = useState<SoapKey | null>(null)
+  const textareaRefs = useRef<Partial<Record<SoapKey, HTMLTextAreaElement | null>>>({})
+  // Prevents the "empty sections" warning from firing more than once per visit load
+  const emptyNoteWarnedRef = useRef(false)
+
+  const autoResize = useCallback((el: HTMLTextAreaElement | null) => {
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = el.scrollHeight + 'px'
+  }, [])
+
+  // Re-size all SOAP textareas whenever note content loads/changes
+  useEffect(() => {
+    soapSections.forEach(section => {
+      autoResize(textareaRefs.current[section] ?? null)
+    })
+  }, [noteTexts, autoResize])
 
   // Patient summary state
   const [patientSummary, setPatientSummary] = useState('')
@@ -296,7 +312,6 @@ export const VisitDetail = () => {
 
   // Inline edit state
   const [editingField, setEditingField] = useState<string | null>(null)
-  const [chiefComplaintDraft, setChiefComplaintDraft] = useState('')
   const [visitDateDraft, setVisitDateDraft] = useState('')
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -305,6 +320,7 @@ export const VisitDetail = () => {
   useEffect(() => {
     if (!visitId) return
     // Reset all visit-specific state when navigating to a new visit
+    emptyNoteWarnedRef.current = false
     setNote(null)
     setNoteTexts({ subjective: '', objective: '', assessment: '', plan: '' })
     setSyncedSections({ subjective: false, objective: false, assessment: false, plan: false })
@@ -312,7 +328,6 @@ export const VisitDetail = () => {
     setCurrentStep(0)
     setPatientSummary('')
     setSummaryEmail('')
-    setChiefComplaintDraft('')
     setVisitDateDraft('')
     setLiveRecordingDone(false)
     liveSegmentsRef.current = []
@@ -323,7 +338,6 @@ export const VisitDetail = () => {
     getVisit(visitId)
       .then(v => {
         setVisit(v)
-        setChiefComplaintDraft(v.chief_complaint || '')
         setVisitDateDraft(v.visit_date)
         // Advance to summarize step only if transcription is in progress or done
         if ((v.audio_file_path || v.transcript) && v.transcription_status !== 'failed') {
@@ -354,9 +368,10 @@ export const VisitDetail = () => {
           assessment: Boolean(n.synced_sections?.assessment),
           plan: Boolean(n.synced_sections?.plan),
         })
-        if (n.status === 'draft' && Object.values(texts).every(t => !t)) {
+        if (n.status === 'draft' && Object.values(texts).every(t => !t) && !emptyNoteWarnedRef.current) {
+          emptyNoteWarnedRef.current = true
           console.error('[loadNote] Draft note has all-empty sections — content may have unexpected structure.', n.content)
-          toast.warning('Note was generated but sections could not be displayed. Please try re-generating.')
+          toast.warning('Note was generated but sections could not be displayed. Please try re-generating.', 0)
         }
       }
     } catch (err) {
@@ -364,7 +379,7 @@ export const VisitDetail = () => {
     } finally {
       setNoteLoadAttempted(true)
     }
-  }, [visitId, toast])
+  }, [visitId, toast.warning])
 
   useEffect(() => {
     loadNote()
@@ -394,9 +409,10 @@ export const VisitDetail = () => {
                 plan: sectionToText('plan', n.content),
               }
               setNoteTexts(texts)
-              if (n.status === 'draft' && Object.values(texts).every(t => !t)) {
+              if (n.status === 'draft' && Object.values(texts).every(t => !t) && !emptyNoteWarnedRef.current) {
+                emptyNoteWarnedRef.current = true
                 console.error('[notePolling] Draft note has all-empty sections — content may have unexpected structure.', n.content)
-                toast.warning('Note was generated but sections could not be displayed. Please try re-generating.')
+                toast.warning('Note was generated but sections could not be displayed. Please try re-generating.', 0)
               }
             }
           }
@@ -421,15 +437,16 @@ export const VisitDetail = () => {
             assessment: Boolean(n.synced_sections?.assessment),
             plan: Boolean(n.synced_sections?.plan),
           })
-          if (n.status === 'draft' && Object.values(texts).every(t => !t)) {
+          if (n.status === 'draft' && Object.values(texts).every(t => !t) && !emptyNoteWarnedRef.current) {
+            emptyNoteWarnedRef.current = true
             console.error('[notePolling] Draft note has all-empty sections — content may have unexpected structure.', n.content)
-            toast.warning('Note was generated but sections could not be displayed. Please try re-generating.')
+            toast.warning('Note was generated but sections could not be displayed. Please try re-generating.', 0)
           }
         }
       } catch (err) { console.error('[notePolling] Error fetching note:', err) }
     }, 3000)
     return () => clearInterval(interval)
-  }, [note?.status, visitId, toast])
+  }, [note?.status, visitId, toast.warning])
 
   const handleRetryTranscription = async () => {
     if (!visitId) return
@@ -549,12 +566,10 @@ export const VisitDetail = () => {
     }
   }
 
-  const handleSaveField = async (field: 'chief_complaint' | 'visit_date') => {
+  const handleSaveField = async (field: 'visit_date') => {
     if (!visitId) return
     try {
-      const updated = await updateVisit(visitId, {
-        [field]: field === 'chief_complaint' ? chiefComplaintDraft : visitDateDraft
-      })
+      const updated = await updateVisit(visitId, { [field]: visitDateDraft })
       setVisit(updated)
     } catch { /* ignore */ }
     setEditingField(null)
@@ -591,25 +606,6 @@ export const VisitDetail = () => {
         <div>
           <h1 className="text-4xl mb-2">{visit.patient_ref}</h1>
           <div className="flex items-center gap-2 text-sm text-gray-500 flex-wrap">
-            {/* Chief complaint */}
-            {editingField === 'chief_complaint' ? (
-              <input
-                autoFocus
-                value={chiefComplaintDraft}
-                onChange={e => setChiefComplaintDraft(e.target.value)}
-                onBlur={() => handleSaveField('chief_complaint')}
-                onKeyDown={e => e.key === 'Enter' && handleSaveField('chief_complaint')}
-                className="italic text-sm border-b border-[#4ac6d6] focus:outline-none bg-transparent"
-              />
-            ) : (
-              <button
-                onClick={() => setEditingField('chief_complaint')}
-                className="italic hover:text-gray-700"
-              >
-                {visit.chief_complaint || 'Add chief complaint'}
-              </button>
-            )}
-            <span>•</span>
             {/* Date */}
             {editingField === 'visit_date' ? (
               <input
@@ -632,12 +628,24 @@ export const VisitDetail = () => {
             <span>{new Date(visit.visit_date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span>
           </div>
         </div>
-        <button
-          onClick={() => setShowDeleteConfirm(true)}
-          className="text-gray-400 hover:text-red-500 transition-colors mt-1"
-        >
-          <Trash2 size={20} />
-        </button>
+        <div className="flex items-center gap-2 mt-1">
+          {note?.status === 'draft' && !isGeneratingNote && (
+            <button
+              onClick={handleRegenerateNote}
+              disabled={isRegenerating}
+              title="Re-generate summarization"
+              className="text-gray-400 hover:text-[#4ac6d6] transition-colors disabled:opacity-50"
+            >
+              <RotateCcw size={20} />
+            </button>
+          )}
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            className="text-gray-400 hover:text-red-500 transition-colors"
+          >
+            <Trash2 size={20} />
+          </button>
+        </div>
       </div>
 
       {/* Step Progress Indicator */}
@@ -866,9 +874,10 @@ export const VisitDetail = () => {
                     >
                       <div className="px-6 pb-6 pt-1">
                         <textarea
+                          ref={el => { textareaRefs.current[section] = el; autoResize(el) }}
                           value={noteTexts[section]}
-                          onChange={e => setNoteTexts(prev => ({ ...prev, [section]: e.target.value }))}
-                          className="w-full min-h-[200px] resize-y text-sm text-gray-700 focus:outline-none bg-transparent"
+                          onChange={e => { setNoteTexts(prev => ({ ...prev, [section]: e.target.value })); autoResize(e.target) }}
+                          className="w-full resize-none overflow-hidden text-sm text-gray-700 focus:outline-none bg-transparent"
                           placeholder={sectionPlaceholders[section]}
                         />
                         <div className="flex justify-end mt-3">
@@ -890,19 +899,6 @@ export const VisitDetail = () => {
                 </AnimatePresence>
               </div>
             ))}
-
-            {/* Re-generate button */}
-            {note?.status === 'draft' && !isGeneratingNote && (
-              <div className="flex justify-center">
-                <button
-                  onClick={handleRegenerateNote}
-                  disabled={isRegenerating}
-                  className="text-sm text-gray-400 hover:text-[#4ac6d6] border border-gray-200 hover:border-[#4ac6d6] rounded-xl px-5 py-2 transition-colors disabled:opacity-50"
-                >
-                  {isRegenerating ? 'regenerating...' : '↺ re-generate summarization'}
-                </button>
-              </div>
-            )}
 
             {/* Patient Summary */}
             {note?.status === 'draft' && !isGeneratingNote && (

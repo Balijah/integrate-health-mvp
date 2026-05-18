@@ -219,7 +219,7 @@ export const Layout = ({
                     </div>
                   </div>
 
-                  <div className="max-h-48 overflow-y-auto">
+                  <div>
                     {filteredVisits.length === 0 ? (
                       <p className="text-xs text-gray-400 italic px-4 py-2">No patients</p>
                     ) : (
@@ -237,9 +237,6 @@ export const Layout = ({
                               {new Date(visit.visit_date).toLocaleDateString()}
                             </div>
                             <div className="text-sm text-gray-800 truncate">{visit.patient_ref}</div>
-                            {visit.chief_complaint && (
-                              <div className="text-xs italic text-gray-500 truncate">{visit.chief_complaint}</div>
-                            )}
                           </div>
                         </button>
                       ))
