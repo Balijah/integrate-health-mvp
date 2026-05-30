@@ -70,6 +70,10 @@ resource "aws_instance" "app" {
   }
 
   depends_on = [aws_nat_gateway.main]
+
+  lifecycle {
+    ignore_changes = [ami]
+  }
 }
 
 # CloudWatch Log Group for application
