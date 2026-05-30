@@ -32,7 +32,8 @@ if [ "$SKIP_BACKEND" = false ]; then
     --exclude='.DS_Store' \
     backend/app/ \
     backend/alembic/ \
-    backend/requirements.txt
+    backend/requirements.txt \
+    deployment/worker.service
 
   echo "=== Uploading to S3 ==="
   aws s3 cp /tmp/backend-deploy.tar.gz "s3://${S3_AUDIO}/${DEPLOY_KEY}"
@@ -49,8 +50,13 @@ if [ "$SKIP_BACKEND" = false ]; then
       \"tar -xzf /tmp/backend-deploy.tar.gz -C /home/ec2-user/app/ --strip-components=0\",
       \"cd /home/ec2-user/app/backend && source venv/bin/activate && alembic upgrade head 2>&1\",
       \"sudo systemctl restart integrate-health\",
+      \"sudo cp /home/ec2-user/app/deployment/worker.service /etc/systemd/system/integrate-health-worker.service\",
+      \"sudo systemctl daemon-reload\",
+      \"sudo systemctl enable integrate-health-worker\",
+      \"sudo systemctl restart integrate-health-worker\",
       \"sleep 5\",
       \"sudo systemctl is-active integrate-health\",
+      \"sudo systemctl is-active integrate-health-worker\",
       \"curl -sf http://localhost:8000/health && echo '' || (echo 'HEALTH CHECK FAILED' && exit 1)\"
     ]" \
     --query 'Command.CommandId' --output text)

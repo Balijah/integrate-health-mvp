@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     bedrock_max_tokens: int = 16384
     bedrock_temperature: float = 0.3
 
+    # Task Queue (SQS)
+    sqs_queue_url: str = ""  # Set in production; empty = local BackgroundTasks fallback
+
     # Legacy
     anthropic_api_key: str = ""
 

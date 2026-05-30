@@ -10,6 +10,7 @@ import logging
 import uuid
 from datetime import datetime, timezone, timedelta
 
+import boto3
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from sqlalchemy import select
 
@@ -38,6 +39,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _enqueue_note_generation(note_id: str, additional_context: str) -> None:
+    """Send a note generation task to SQS."""
+    settings = get_settings()
+    sqs = boto3.client("sqs", region_name=settings.aws_region)
+    sqs.send_message(
+        QueueUrl=settings.sqs_queue_url,
+        MessageBody=json.dumps({
+            "task_type": "generate_note",
+            "note_id": note_id,
+            "additional_context": additional_context,
+        }),
+    )
+    logger.info(f"[SQS] Enqueued generate_note for note_id={note_id}")
+
+
 async def _run_note_generation(
     note_id: str, transcript: str, additional_context: str, database_url: str
 ) -> None:
@@ -54,7 +70,7 @@ async def _run_note_generation(
         )
         new_status = "draft"
     except asyncio.TimeoutError:
-        logger.error(f"Note generation timed out after 180s for note {note_id}")
+        logger.error(f"Note generation timed out after 360s for note {note_id}")
         content = {}
         new_status = "failed"
     except BaseException as e:
@@ -153,14 +169,17 @@ async def generate_note(
             existing.content = {}
             existing.status = "generating"
             await db.flush()
-            background_tasks.add_task(
-                _run_note_generation,
-                str(existing.id),
-                visit.transcript,
-                request.additional_context or "",
-                settings.database_url,
-            )
-            logger.info(f"Note {existing.id} reset to generating, background task re-queued")
+            if settings.sqs_queue_url:
+                _enqueue_note_generation(str(existing.id), request.additional_context or "")
+            else:
+                background_tasks.add_task(
+                    _run_note_generation,
+                    str(existing.id),
+                    visit.transcript,
+                    request.additional_context or "",
+                    settings.database_url,
+                )
+            logger.info(f"Note {existing.id} reset to generating, re-queued for generation")
             return GenerateNoteResponse(
                 note_id=existing.id,
                 visit_id=visit_id,
@@ -189,15 +208,18 @@ async def generate_note(
     await db.flush()
     await db.refresh(note)
 
-    background_tasks.add_task(
-        _run_note_generation,
-        str(note.id),
-        visit.transcript,
-        request.additional_context or "",
-        settings.database_url,
-    )
+    if settings.sqs_queue_url:
+        _enqueue_note_generation(str(note.id), request.additional_context or "")
+    else:
+        background_tasks.add_task(
+            _run_note_generation,
+            str(note.id),
+            visit.transcript,
+            request.additional_context or "",
+            settings.database_url,
+        )
 
-    logger.info(f"Note {note.id} created with status=generating, background task queued")
+    logger.info(f"Note {note.id} created with status=generating, queued for generation")
 
     return GenerateNoteResponse(
         note_id=note.id,

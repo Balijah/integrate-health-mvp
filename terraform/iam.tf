@@ -90,6 +90,32 @@ resource "aws_iam_role_policy" "cloudwatch_logs" {
   })
 }
 
+# SQS access for note generation task queue
+resource "aws_iam_role_policy" "sqs_access" {
+  name = "integrate-health-sqs-access"
+  role = aws_iam_role.ec2.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "SQSNoteQueue"
+      Effect = "Allow"
+      Action = [
+        "sqs:SendMessage",
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:ChangeMessageVisibility",
+        "sqs:GetQueueAttributes",
+        "sqs:GetQueueUrl",
+      ]
+      Resource = [
+        aws_sqs_queue.notes.arn,
+        aws_sqs_queue.notes_dlq.arn,
+      ]
+    }]
+  })
+}
+
 # SSM access for Session Manager (optional alternative to SSH)
 resource "aws_iam_role_policy_attachment" "ssm" {
   role       = aws_iam_role.ec2.name

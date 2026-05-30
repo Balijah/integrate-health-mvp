@@ -65,3 +65,13 @@ output "nat_gateway_ip" {
   description = "NAT Gateway public IP (for whitelisting)"
   value       = var.enable_nat_gateway ? aws_eip.nat[0].public_ip : null
 }
+
+output "sqs_notes_queue_url" {
+  description = "SQS queue URL for note generation tasks — add to .env as SQS_QUEUE_URL"
+  value       = aws_sqs_queue.notes.url
+}
+
+output "sqs_notes_dlq_url" {
+  description = "SQS dead-letter queue URL (monitor for failed note generation)"
+  value       = aws_sqs_queue.notes_dlq.url
+}

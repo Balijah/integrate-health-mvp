@@ -1,0 +1,26 @@
+[Unit]
+Description=Integrate Health Worker
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/home/ec2-user/app/backend
+EnvironmentFile=/home/ec2-user/app/backend/.env
+ExecStart=/home/ec2-user/app/backend/venv/bin/python -m app.worker
+Restart=always
+RestartSec=10
+StartLimitInterval=60
+StartLimitBurst=3
+# Allow up to 10 minutes for a running job to complete before SIGKILL
+TimeoutStopSec=600
+SyslogIdentifier=integrate-health-worker
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -8,10 +8,11 @@ via AWS Bedrock.
 import json
 import logging
 import re
+import time
 from datetime import datetime, timezone
 
 import boto3
-from botocore.exceptions import ClientError, BotoCoreError
+from botocore.exceptions import ClientError, BotoCoreError, EventStreamError
 
 from app.config import get_settings
 
@@ -303,7 +304,9 @@ def _get_bedrock_client():
     from botocore.config import Config
     settings = get_settings()
     config = Config(
-        read_timeout=300,    # 5 minutes — long transcripts can take 2-3 min on cross-region inference
+        read_timeout=600,    # 10 min per-chunk guard — with streaming, bytes flow continuously so
+                             # this only fires if the socket goes completely silent between chunks,
+                             # which should never happen under normal Bedrock operation
         connect_timeout=10,
         retries={"max_attempts": 1},
     )
@@ -498,30 +501,52 @@ def generate_soap_note(transcript: str, additional_context: str = "") -> dict:
         logger.info(f"[BEDROCK SYSTEM PROMPT]\n{SYSTEM_PROMPT}")
         logger.info(f"[BEDROCK USER PROMPT]\n{user_prompt}")
 
-        response = bedrock.invoke_model(
+        _generation_start = time.perf_counter()
+        response = bedrock.invoke_model_with_response_stream(
             modelId=settings.bedrock_model_id,
             body=json.dumps(request_body),
             contentType="application/json",
             accept="application/json",
         )
 
-        # Parse response
-        response_body = json.loads(response["body"].read())
+        # Accumulate text chunks and token usage from the streaming event sequence.
+        # Bytes arrive continuously so the socket never goes cold — eliminating the
+        # read timeout failure mode that affects large transcripts.
+        text_chunks = []
+        input_tokens = 0
+        output_tokens = 0
 
-        # Extract response text and strip any code fences the model may include
-        response_text = response_body["content"][0]["text"]
+        for event in response["body"]:
+            chunk_bytes = event.get("chunk", {}).get("bytes")
+            if not chunk_bytes:
+                continue
+            event_data = json.loads(chunk_bytes.decode("utf-8"))
+            event_type = event_data.get("type")
+
+            if event_type == "content_block_delta":
+                delta = event_data.get("delta", {})
+                if delta.get("type") == "text_delta":
+                    text_chunks.append(delta.get("text", ""))
+            elif event_type == "message_start":
+                input_tokens = event_data.get("message", {}).get("usage", {}).get("input_tokens", 0)
+            elif event_type == "message_delta":
+                output_tokens = event_data.get("usage", {}).get("output_tokens", 0)
+
+        response_text = "".join(text_chunks)
+        duration_seconds = round(time.perf_counter() - _generation_start, 2)
+
+        if not response_text.strip():
+            logger.error("[BEDROCK STREAM] Stream completed but produced no text content")
+            raise NoteGenerationError("AI service returned an empty response. Please try again.")
+
+        # Strip any code fences the model may include
         response_text = re.sub(
             r"^```(?:json)?\s*|\s*```$", "", response_text.strip(), flags=re.MULTILINE
         )
 
-        # Capture token usage from Bedrock response
-        usage = response_body.get("usage", {})
-        input_tokens = usage.get("input_tokens", 0)
-        output_tokens = usage.get("output_tokens", 0)
-
         logger.info(
             f"[BEDROCK RESPONSE] input_tokens={input_tokens} output_tokens={output_tokens} "
-            f"response_len={len(response_text)}"
+            f"response_len={len(response_text)} duration_seconds={duration_seconds}"
         )
         logger.info(f"[BEDROCK RAW RESPONSE]\n{response_text}")
 
@@ -560,10 +585,23 @@ def generate_soap_note(transcript: str, additional_context: str = "") -> dict:
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
             },
+            "generation_duration_seconds": duration_seconds,
         }
 
         logger.info("SOAP note generated successfully")
         return soap_content
+
+    except NoteGenerationError:
+        # Re-raise errors we raised intentionally (e.g. empty stream guard) without
+        # wrapping them in the generic handler below.
+        raise
+
+    except EventStreamError as e:
+        # Must be caught before ClientError — EventStreamError subclasses ClientError
+        # in this botocore version, so ordering matters.
+        error_code = getattr(e, "code", "Unknown")
+        logger.error(f"[BEDROCK STREAM] Stream interrupted: code={error_code} error={str(e)}")
+        raise NoteGenerationError("AI service stream interrupted. Please try again.")
 
     except ClientError as e:
         error_code = e.response.get("Error", {}).get("Code", "Unknown")

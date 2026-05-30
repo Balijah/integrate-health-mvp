@@ -2,9 +2,14 @@
 Tests for note endpoints.
 """
 
+import json
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient
+from unittest.mock import patch, MagicMock
+from botocore.exceptions import ClientError, EventStreamError
+
+from app.services.note_generation import generate_soap_note, NoteGenerationError
 
 
 @pytest.mark.asyncio
@@ -219,3 +224,111 @@ class TestNoteWithExistingNote:
         assert response.status_code == 200
         data = response.json()
         assert data["format"] == "json"
+
+
+# ---------------------------------------------------------------------------
+# Streaming unit tests — call generate_soap_note() directly, mock boto3
+# ---------------------------------------------------------------------------
+
+_MINIMAL_SOAP = json.dumps({
+    "subjective": {"history_of_present_illness": "Patient reports fatigue."},
+    "objective": {},
+    "assessment": {"diagnoses": ["Fatigue, unspecified"]},
+    "plan": {"follow_up": "Return in 4 weeks."},
+})
+
+_STANDARD_EVENTS = [
+    {"type": "message_start", "message": {"usage": {"input_tokens": 100}}},
+    {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+    {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": _MINIMAL_SOAP[:60]}},
+    {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": _MINIMAL_SOAP[60:]}},
+    {"type": "content_block_stop", "index": 0},
+    {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 42}},
+    {"type": "message_stop"},
+]
+
+
+def _make_stream_response(events):
+    """Build a mock return value for invoke_model_with_response_stream."""
+    chunks = [{"chunk": {"bytes": json.dumps(ev).encode("utf-8")}} for ev in events]
+    return {"body": iter(chunks)}
+
+
+class TestGenerateSoapNoteStreaming:
+    """Unit tests for the streaming Bedrock note generation path."""
+
+    def test_streaming_success(self):
+        mock_bedrock = MagicMock()
+        mock_bedrock.invoke_model_with_response_stream.return_value = _make_stream_response(_STANDARD_EVENTS)
+
+        with patch("app.services.note_generation.boto3.client", return_value=mock_bedrock):
+            result = generate_soap_note("Doctor: Hello. Patient: I have fatigue.")
+
+        assert "subjective" in result
+        assert "assessment" in result
+        assert "plan" in result
+        assert result["metadata"]["usage"]["input_tokens"] == 100
+        assert result["metadata"]["usage"]["output_tokens"] == 42
+        mock_bedrock.invoke_model_with_response_stream.assert_called_once()
+        mock_bedrock.invoke_model.assert_not_called()
+
+    def test_streaming_throttling(self):
+        mock_bedrock = MagicMock()
+        mock_bedrock.invoke_model_with_response_stream.side_effect = ClientError(
+            {"Error": {"Code": "ThrottlingException", "Message": "Rate exceeded"}},
+            "InvokeModelWithResponseStream",
+        )
+
+        with patch("app.services.note_generation.boto3.client", return_value=mock_bedrock):
+            with pytest.raises(NoteGenerationError) as exc_info:
+                generate_soap_note("Doctor: Hello. Patient: I have fatigue.")
+
+        assert "rate limit" in str(exc_info.value).lower()
+
+    def test_streaming_mid_stream_error(self):
+        class _ErrorStream:
+            def __iter__(self):
+                yield {"chunk": {"bytes": json.dumps(_STANDARD_EVENTS[0]).encode("utf-8")}}
+                raise EventStreamError({}, "InvokeModelWithResponseStream")
+
+        mock_bedrock = MagicMock()
+        mock_bedrock.invoke_model_with_response_stream.return_value = {"body": _ErrorStream()}
+
+        with patch("app.services.note_generation.boto3.client", return_value=mock_bedrock):
+            with pytest.raises(NoteGenerationError) as exc_info:
+                generate_soap_note("Doctor: Hello. Patient: I have fatigue.")
+
+        assert "stream interrupted" in str(exc_info.value).lower()
+
+    def test_streaming_empty_stream(self):
+        empty_events = [
+            {"type": "message_start", "message": {"usage": {"input_tokens": 50}}},
+            {"type": "message_stop"},
+        ]
+        mock_bedrock = MagicMock()
+        mock_bedrock.invoke_model_with_response_stream.return_value = _make_stream_response(empty_events)
+
+        with patch("app.services.note_generation.boto3.client", return_value=mock_bedrock):
+            with pytest.raises(NoteGenerationError) as exc_info:
+                generate_soap_note("Doctor: Hello. Patient: I have fatigue.")
+
+        assert "empty response" in str(exc_info.value).lower()
+
+    def test_streaming_truncated_json(self):
+        truncated_events = [
+            {"type": "message_start", "message": {"usage": {"input_tokens": 50}}},
+            {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": '{"subjective": {"hpi": "test'}},
+            {"type": "message_stop"},
+        ]
+        mock_bedrock = MagicMock()
+        mock_bedrock.invoke_model_with_response_stream.return_value = _make_stream_response(truncated_events)
+
+        with patch("app.services.note_generation.boto3.client", return_value=mock_bedrock):
+            with pytest.raises(NoteGenerationError):
+                generate_soap_note("Doctor: Hello. Patient: I have fatigue.")
+
+    def test_empty_transcript_raises(self):
+        with pytest.raises(NoteGenerationError) as exc_info:
+            generate_soap_note("")
+
+        assert "empty" in str(exc_info.value).lower()
