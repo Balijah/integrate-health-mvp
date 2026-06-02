@@ -34,8 +34,8 @@ resource "aws_db_instance" "main" {
   db_subnet_group_name   = aws_db_subnet_group.main.name
   publicly_accessible    = false  # Private subnet only
 
-  # Backup configuration
-  backup_retention_period = 7     # Keep backups for 7 days
+  # Backup configuration — 35 days covers a full month + weekly review cycle
+  backup_retention_period = 35
   backup_window          = "03:00-04:00"  # UTC
   maintenance_window     = "Mon:04:00-Mon:05:00"
 
@@ -47,9 +47,12 @@ resource "aws_db_instance" "main" {
   monitoring_interval = 60
   monitoring_role_arn = aws_iam_role.rds_monitoring.arn
 
-  # Deletion protection (disable for MVP/testing)
-  deletion_protection = false
-  skip_final_snapshot = true  # For MVP; set to false in production
+  deletion_protection = true
+  skip_final_snapshot = false
+
+  lifecycle {
+    prevent_destroy = true
+  }
 
   # Enable automatic minor version upgrades
   auto_minor_version_upgrade = true
