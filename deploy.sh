@@ -69,7 +69,13 @@ if [ "$SKIP_BACKEND" = false ]; then
     --query 'Command.CommandId' --output text)
 
   echo "=== Waiting for EC2 deploy (command: $CMD_ID) ==="
-  sleep 20
+  # Poll until done (migrations can take 30-60s on first run)
+  for _i in $(seq 1 18); do
+    _st=$(aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" --query 'Status' --output text 2>/dev/null)
+    echo "  status: $_st"
+    if [ "$_st" = "Success" ] || [ "$_st" = "Failed" ] || [ "$_st" = "TimedOut" ]; then break; fi
+    sleep 10
+  done
   RESULT=$(aws ssm get-command-invocation \
     --command-id "$CMD_ID" \
     --instance-id "$INSTANCE_ID" \
