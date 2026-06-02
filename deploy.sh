@@ -45,6 +45,18 @@ if [ "$SKIP_BACKEND" = false ]; then
     --db-snapshot-identifier "pre-deploy-${TIMESTAMP}" \
     --no-cli-pager || echo "WARNING: RDS snapshot request failed — continuing deploy"
 
+  echo "=== Pruning pre-deploy snapshots older than 7 days ==="
+  CUTOFF=$(date -u -v-7d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)
+  aws rds describe-db-snapshots \
+    --db-instance-identifier integrate-health-db \
+    --snapshot-type manual \
+    --query "DBSnapshots[?SnapshotCreateTime<='${CUTOFF}' && starts_with(DBSnapshotIdentifier, 'pre-deploy-')].DBSnapshotIdentifier" \
+    --output text | tr '\t' '\n' | while read -r SNAP; do
+      [ -z "$SNAP" ] && continue
+      echo "  Deleting old snapshot: $SNAP"
+      aws rds delete-db-snapshot --db-snapshot-identifier "$SNAP" --no-cli-pager || true
+    done
+
   echo "=== Deploying to EC2 (SSM) ==="
   CMD_ID=$(aws ssm send-command \
     --instance-ids "$INSTANCE_ID" \
