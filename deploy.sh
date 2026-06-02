@@ -7,10 +7,11 @@ set -e
 
 INSTANCE_ID="i-0393d6a09fd7df62f"
 S3_AUDIO="integrate-health-audio-317440775804"
+S3_DEPLOY="integrate-health-deploy-317440775804"
 S3_FRONTEND="integrate-health-frontend-317440775804"
 CF_DISTRIBUTION="E3O39Z192PMEOR"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-DEPLOY_KEY="deploys/backend-${TIMESTAMP}.tar.gz"
+DEPLOY_KEY="backend-${TIMESTAMP}.tar.gz"
 
 SKIP_BACKEND=false
 SKIP_FRONTEND=false
@@ -35,8 +36,14 @@ if [ "$SKIP_BACKEND" = false ]; then
     backend/requirements.txt \
     deployment/worker.service
 
-  echo "=== Uploading to S3 ==="
-  aws s3 cp /tmp/backend-deploy.tar.gz "s3://${S3_AUDIO}/${DEPLOY_KEY}"
+  echo "=== Uploading to S3 (deploy bucket) ==="
+  aws s3 cp /tmp/backend-deploy.tar.gz "s3://${S3_DEPLOY}/${DEPLOY_KEY}"
+
+  echo "=== Creating pre-migration RDS snapshot ==="
+  aws rds create-db-snapshot \
+    --db-instance-identifier integrate-health-db \
+    --db-snapshot-identifier "pre-deploy-${TIMESTAMP}" \
+    --no-cli-pager || echo "WARNING: RDS snapshot request failed — continuing deploy"
 
   echo "=== Deploying to EC2 (SSM) ==="
   CMD_ID=$(aws ssm send-command \
@@ -45,7 +52,7 @@ if [ "$SKIP_BACKEND" = false ]; then
     --timeout-seconds 120 \
     --parameters "commands=[
       \"set -e\",
-      \"aws s3 cp s3://${S3_AUDIO}/${DEPLOY_KEY} /tmp/backend-deploy.tar.gz\",
+      \"aws s3 cp s3://${S3_DEPLOY}/${DEPLOY_KEY} /tmp/backend-deploy.tar.gz\",
       \"find /home/ec2-user/app/backend -name '._*' -delete 2>/dev/null || true\",
       \"tar -xzf /tmp/backend-deploy.tar.gz -C /home/ec2-user/app/ --strip-components=0\",
       \"cd /home/ec2-user/app/backend && source venv/bin/activate && alembic upgrade head 2>&1\",
@@ -94,8 +101,8 @@ if [ "$SKIP_FRONTEND" = false ]; then
     --exclude='.DS_Store' \
     frontend/dist/
 
-  echo "=== Uploading to S3 ==="
-  aws s3 cp /tmp/frontend-dist.tar.gz "s3://${S3_AUDIO}/deploys/frontend-dist.tar.gz"
+  echo "=== Uploading to S3 (deploy bucket) ==="
+  aws s3 cp /tmp/frontend-dist.tar.gz "s3://${S3_DEPLOY}/frontend-dist.tar.gz"
 
   echo "=== Deploying frontend to EC2 (SSM) ==="
   FE_CMD_ID=$(aws ssm send-command \
@@ -104,7 +111,7 @@ if [ "$SKIP_FRONTEND" = false ]; then
     --timeout-seconds 60 \
     --parameters "commands=[
       \"set -e\",
-      \"aws s3 cp s3://${S3_AUDIO}/deploys/frontend-dist.tar.gz /tmp/frontend-dist.tar.gz\",
+      \"aws s3 cp s3://${S3_DEPLOY}/frontend-dist.tar.gz /tmp/frontend-dist.tar.gz\",
       \"sudo tar -xzf /tmp/frontend-dist.tar.gz -C /var/www/html/ --strip-components=2\",
       \"sudo nginx -t && sudo systemctl reload nginx\"
     ]" \

@@ -83,7 +83,7 @@ resource "aws_db_parameter_group" "main" {
 
   parameter {
     name  = "log_statement"
-    value = "ddl"
+    value = "mod"
   }
 
   # SSL enforcement

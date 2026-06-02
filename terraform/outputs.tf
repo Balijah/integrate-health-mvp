@@ -75,3 +75,8 @@ output "sqs_notes_dlq_url" {
   description = "SQS dead-letter queue URL (monitor for failed note generation)"
   value       = aws_sqs_queue.notes_dlq.url
 }
+
+output "deploy_bucket_name" {
+  description = "S3 bucket for deployment artifacts (separate from PHI audio bucket)"
+  value       = aws_s3_bucket.deploy.id
+}

@@ -6,13 +6,15 @@ Configures the app with CORS, routes, and health check endpoint.
 
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from sqlalchemy import text
 
 from app.config import get_settings
+from app.database import AsyncSessionLocal
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,20 +55,21 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
 )
 
 
 @app.get("/health")
-async def health_check() -> dict:
-    """
-    Health check endpoint.
-
-    Returns:
-        dict: Health status
-    """
-    return {"status": "healthy"}
+async def health_check(response: Response) -> dict:
+    """Health check — probes the database and returns 503 if unreachable."""
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(text("SELECT 1"))
+        return {"status": "healthy", "db": "ok"}
+    except Exception as exc:
+        response.status_code = 503
+        return {"status": "unhealthy", "db": str(exc)}
 
 
 @app.get("/")

@@ -24,10 +24,11 @@ export interface LoginRequest {
 }
 
 /**
- * Token response from login.
+ * Token response from login or refresh.
  */
 export interface TokenResponse {
   access_token: string
+  refresh_token: string
   token_type: string
 }
 
@@ -64,6 +65,14 @@ export const register = async (data: RegisterRequest): Promise<UserResponse> => 
  */
 export const login = async (data: LoginRequest): Promise<TokenResponse> => {
   const response = await apiClient.post<TokenResponse>('/auth/login', data)
+  return response.data
+}
+
+/**
+ * Exchange a refresh token for a new token pair.
+ */
+export const refreshTokens = async (refresh_token: string): Promise<TokenResponse> => {
+  const response = await apiClient.post<TokenResponse>('/auth/refresh', { refresh_token })
   return response.data
 }
 

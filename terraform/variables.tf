@@ -70,3 +70,9 @@ variable "jwt_secret_key" {
   type        = string
   sensitive   = true
 }
+
+variable "alert_email" {
+  description = "Email address to receive CloudWatch alarm notifications"
+  type        = string
+  default     = "burhan.khan@answerrocket.com"
+}

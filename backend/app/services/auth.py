@@ -49,29 +49,41 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 
 def create_access_token(user_id: str) -> str:
-    """
-    Create a JWT access token for a user.
-
-    Args:
-        user_id: User's UUID as string
-
-    Returns:
-        str: Encoded JWT token
-    """
     now = datetime.now(timezone.utc)
     expire = now + timedelta(hours=settings.jwt_expiration_hours)
-
     payload = {
         "sub": user_id,
         "exp": int(expire.timestamp()),
         "iat": int(now.timestamp()),
+        "type": "access",
     }
+    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
-    return jwt.encode(
-        payload,
-        settings.jwt_secret_key,
-        algorithm=settings.jwt_algorithm,
-    )
+
+def create_refresh_token(user_id: str) -> str:
+    now = datetime.now(timezone.utc)
+    expire = now + timedelta(days=settings.jwt_refresh_expiration_days)
+    payload = {
+        "sub": user_id,
+        "exp": int(expire.timestamp()),
+        "iat": int(now.timestamp()),
+        "type": "refresh",
+    }
+    return jwt.encode(payload, settings.jwt_refresh_secret_key, algorithm=settings.jwt_algorithm)
+
+
+def decode_refresh_token(token: str) -> TokenPayload | None:
+    try:
+        payload = jwt.decode(
+            token,
+            settings.jwt_refresh_secret_key,
+            algorithms=[settings.jwt_algorithm],
+        )
+        if payload.get("type") != "refresh":
+            return None
+        return TokenPayload(**payload)
+    except JWTError:
+        return None
 
 
 def decode_access_token(token: str) -> TokenPayload | None:

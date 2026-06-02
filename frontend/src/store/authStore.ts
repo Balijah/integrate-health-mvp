@@ -26,6 +26,8 @@ interface AuthState {
   user: UserResponse | null
   /** JWT access token */
   token: string | null
+  /** JWT refresh token */
+  refreshToken: string | null
   /** Loading state for auth operations */
   isLoading: boolean
   /** Error message from last operation */
@@ -61,6 +63,7 @@ type AuthStore = AuthState & AuthActions
 const initialState: AuthState = {
   user: null,
   token: null,
+  refreshToken: null,
   isLoading: false,
   error: null,
   isAuthenticated: false,
@@ -79,15 +82,16 @@ export const useAuthStore = create<AuthStore>()(
         try {
           const response = await loginApi(data)
           const token = response.access_token
+          const refreshToken = response.refresh_token
 
-          // Store token in localStorage for API client
           localStorage.setItem('token', token)
+          localStorage.setItem('refresh_token', refreshToken)
 
-          // Load user data
           const user = await getCurrentUser()
 
           set({
             token,
+            refreshToken,
             user,
             isAuthenticated: true,
             isLoading: false,
@@ -122,9 +126,8 @@ export const useAuthStore = create<AuthStore>()(
 
       logout: () => {
         localStorage.removeItem('token')
-        set({
-          ...initialState,
-        })
+        localStorage.removeItem('refresh_token')
+        set({ ...initialState })
       },
 
       loadUser: async () => {
@@ -164,6 +167,7 @@ export const useAuthStore = create<AuthStore>()(
       name: 'auth-storage',
       partialize: (state) => ({
         token: state.token,
+        refreshToken: state.refreshToken,
       }),
     }
   )

@@ -18,7 +18,14 @@ class TokenResponse(BaseModel):
     """Schema for authentication token response."""
 
     access_token: str = Field(..., description="JWT access token")
+    refresh_token: str = Field(..., description="JWT refresh token (7 days)")
     token_type: str = Field(default="bearer", description="Token type")
+
+
+class RefreshRequest(BaseModel):
+    """Schema for token refresh request."""
+
+    refresh_token: str = Field(..., description="JWT refresh token")
 
 
 class TokenPayload(BaseModel):

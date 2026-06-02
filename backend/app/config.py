@@ -13,14 +13,16 @@ class Settings(BaseSettings):
 
     # Application
     app_name: str = "Integrate Health MVP"
-    debug: bool = True
-    environment: str = "development"
+    debug: bool = False
+    environment: str = "production"
 
     # Security
     app_secret_key: str = "dev-secret-key-change-in-production-min32"
     jwt_secret_key: str = "dev-jwt-secret-key-change-in-prod-min32"
+    jwt_refresh_secret_key: str = "dev-jwt-refresh-secret-change-in-prod"
     jwt_algorithm: str = "HS256"
-    jwt_expiration_hours: int = 24
+    jwt_expiration_hours: int = 8
+    jwt_refresh_expiration_days: int = 7
 
     # Database
     database_url: str = "postgresql+asyncpg://postgres:postgres@db:5432/integrate_health"
@@ -74,6 +76,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
+        extra = "ignore"
 
 
 @lru_cache
