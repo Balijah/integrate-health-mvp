@@ -138,7 +138,18 @@
       "Bash(pip install *)",
       "Bash(gh workflow *)",
       "Bash(brew list *)",
-      "Read(//usr/local/bin/**)"
+      "Read(//usr/local/bin/**)",
+      "Bash(docker container *)",
+      "Bash(python -m pytest tests/test_notes.py tests/test_worker.py -v)",
+      "Bash(pip3 list *)",
+      "Bash(venv/bin/python -m pytest tests/test_notes.py tests/test_worker.py -v)",
+      "Bash(venv/bin/pip install *)",
+      "Bash(/opt/homebrew/bin/python3.13 -m venv /tmp/test-venv-313)",
+      "Bash(/tmp/test-venv-313/bin/pip install *)",
+      "Bash(PYTHONPATH=. /tmp/test-venv-313/bin/python -m pytest tests/test_notes.py tests/test_worker.py -v)",
+      "Bash(PYTHONPATH=. /tmp/test-venv-313/bin/python -m pytest tests/test_worker.py::TestWorkerHandleGenerateNote -v --tb=short)",
+      "Bash(/tmp/test-venv-313/bin/pytest backend/tests/test_notes.py backend/tests/test_worker.py -v --tb=short)",
+      "Bash(/tmp/test-venv-313/bin/pytest backend/tests/test_notes.py backend/tests/test_worker.py -v --tb=no)"
     ]
   }
 }
