@@ -177,8 +177,7 @@ export const useLiveTranscription = (
     }
 
     ws.onerror = (event) => {
-      // [PHASE0-DIAG] Log status at the moment of error.
-      console.error(`[PHASE0-DIAG] WebSocket error (status=${statusRef.current}):`, event)
+      console.error(`WebSocket error (status=${statusRef.current}):`, event)
       // Don't hard-fail into 'error' while paused — keep the session recoverable via Resume.
       if (statusRef.current !== 'paused') {
         const errorMsg = 'WebSocket connection error'
@@ -189,11 +188,7 @@ export const useLiveTranscription = (
     }
 
     ws.onclose = (event) => {
-      // [PHASE0-DIAG] Capture close code/reason + status.
-      console.log(
-        `[PHASE0-DIAG] WebSocket closed (code=${event.code}, reason="${event.reason}", ` +
-        `wasClean=${event.wasClean}, status=${statusRef.current})`
-      )
+      console.log(`WebSocket closed (code=${event.code}, status=${statusRef.current})`)
       setIsConnected(false)
       isConnectedRef.current = false
       if (statusRef.current === 'active') {
@@ -338,8 +333,7 @@ export const useLiveTranscription = (
 
       case 'error':
         const errorMsg = message.message || 'Unknown error'
-        // [PHASE0-DIAG] Server-side error forwarded to browser; log status to correlate with pause.
-        console.error(`[PHASE0-DIAG] Server error (status=${statusRef.current}):`, errorMsg)
+        console.error(`Server error (status=${statusRef.current}):`, errorMsg)
         setError(errorMsg)
         onError?.(errorMsg)
         break
@@ -373,12 +367,6 @@ export const useLiveTranscription = (
 
   // Pause recording
   const pauseRecording = useCallback(() => {
-    // [PHASE0-DIAG] Log every pause attempt + the socket state, so we can see exactly when the
-    // browser stopped sending audio relative to any later disconnect.
-    console.log(
-      `[PHASE0-DIAG] pauseRecording() called (status=${statusRef.current}, ` +
-      `wsReadyState=${wsRef.current?.readyState})`
-    )
     if (statusRef.current === 'active' && wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'pause' }))
       setStatus('paused')
@@ -388,18 +376,11 @@ export const useLiveTranscription = (
         clearInterval(durationIntervalRef.current)
         durationIntervalRef.current = null
       }
-    } else {
-      console.warn('[PHASE0-DIAG] pauseRecording() no-op — not active or socket not open')
     }
   }, [])
 
   // Resume recording
   const resumeRecording = useCallback(async () => {
-    console.log(
-      `[PHASE0-DIAG] resumeRecording() called (status=${statusRef.current}, ` +
-      `wsReadyState=${wsRef.current?.readyState})`
-    )
-
     // Healthy socket → resume the SAME session (transcript stays in one continuous stream).
     if (statusRef.current === 'paused' && wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'resume' }))

@@ -7,7 +7,6 @@ Provides real-time bidirectional communication for audio streaming and transcrip
 import asyncio
 import base64
 import logging
-import os
 import uuid
 from datetime import datetime
 
@@ -99,19 +98,18 @@ async def transcription_websocket(
     - Server -> Client: Transcript chunks, status updates, errors
     """
     await websocket.accept()
-    # [PHASE0-DIAG] Log the worker pid handling this WS. If it differs from the pid that
-    # logged "Session ... started" (the REST start-live call), the session lives on another
-    # worker and get_session() below will miss it — the multi-worker bug.
-    logger.info(f"[PHASE0-DIAG] WebSocket connected for session {session_id} (pid={os.getpid()})")
+    logger.info(f"WebSocket connected for session {session_id}")
 
     service = get_live_transcription_service()
     session = service.get_session(session_id)
 
     if not session:
+        # The session lives in an in-process dict; if it is missing here the WS reached a
+        # worker that does not hold it. The app runs --workers 1 to prevent this (see
+        # deployment/app.service); a miss otherwise points at a multi-worker misconfiguration.
         logger.warning(
-            f"[PHASE0-DIAG] Session {session_id} NOT FOUND on pid={os.getpid()} at WS connect — "
-            f"likely created on a different uvicorn worker (--workers 2). Known sessions here: "
-            f"{list(service.active_sessions.keys())}"
+            f"Session {session_id} not found at WS connect. "
+            f"Known sessions: {list(service.active_sessions.keys())}"
         )
         await websocket.send_json({
             "type": "error",
@@ -131,12 +129,11 @@ async def transcription_websocket(
                     try:
                         await websocket.send_json(msg)
                         if msg.get("type") == "connection_closed":
-                            # [PHASE0-DIAG] The browser socket is being closed because the
-                            # upstream Deepgram stream dropped. If this fires during a pause,
-                            # it explains the unresponsive Resume.
+                            # Upstream Deepgram stream dropped; close the browser socket so the
+                            # client can recover (reconnect on Resume).
                             logger.info(
-                                f"[PHASE0-DIAG] Forwarding connection_closed for session "
-                                f"{session_id} (pid={os.getpid()}); closing browser WS (1001)"
+                                f"Forwarding connection_closed for session {session_id}; "
+                                f"closing browser WS (1001)"
                             )
                             await websocket.close(code=1001)
                             return
@@ -182,9 +179,6 @@ async def transcription_websocket(
                     })
 
             elif message_type == "pause":
-                logger.info(
-                    f"[PHASE0-DIAG] Received 'pause' for session {session_id} (pid={os.getpid()})"
-                )
                 try:
                     result = service.pause_session(session_id)
                     await websocket.send_json({

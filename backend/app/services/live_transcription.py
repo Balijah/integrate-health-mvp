@@ -5,7 +5,6 @@ Manages live transcription sessions using Deepgram's streaming API.
 """
 
 import logging
-import os
 import threading
 import queue
 from datetime import datetime
@@ -55,8 +54,8 @@ class LiveTranscriptionSession:
             return True
         except Exception as e:
             logger.warning(
-                f"[PHASE0-DIAG] KeepAlive send FAILED for session {self.session_id} "
-                f"(pid={os.getpid()}); Deepgram may drop the stream: {e!r}"
+                f"KeepAlive send failed for session {self.session_id}; "
+                f"Deepgram may drop the stream: {e!r}"
             )
             return False
 
@@ -64,33 +63,16 @@ class LiveTranscriptionSession:
         """Send periodic KeepAlive messages to Deepgram while paused to prevent timeout."""
         self._keepalive_stop.clear()
 
-        pid = os.getpid()
         # Fire the FIRST keepalive synchronously, the instant audio stops, so there is no
-        # gap between the last audio frame and the first keepalive. This is the fix for the
-        # mid-pause Deepgram drop observed in the Phase 0 diagnostics.
-        sent_now = self._send_keepalive()
-        logger.info(
-            f"[PHASE0-DIAG] KeepAlive thread starting for session {self.session_id} "
-            f"(pid={pid}, interval={self.KEEPALIVE_INTERVAL_SECONDS}s, immediate_ping_sent={sent_now}, "
-            f"connection_alive={self._connection_alive})"
-        )
+        # gap between the last audio frame and the first keepalive — without this there was
+        # an ~8s window in which Deepgram could (and did) drop the connection mid-pause.
+        self._send_keepalive()
 
         def _loop():
-            ping = 1 if sent_now else 0
             while not self._keepalive_stop.wait(timeout=self.KEEPALIVE_INTERVAL_SECONDS):
                 if not self._connection_alive:
-                    logger.info(
-                        f"[PHASE0-DIAG] KeepAlive loop exiting for session {self.session_id} "
-                        f"(pid={pid}) — connection no longer alive after {ping} ping(s)"
-                    )
                     break
-                if self._send_keepalive():
-                    ping += 1
-                    logger.info(
-                        f"[PHASE0-DIAG] KeepAlive ping #{ping} sent to Deepgram "
-                        f"for session {self.session_id} (pid={pid})"
-                    )
-                else:
+                if not self._send_keepalive():
                     # Connection gone; on_close will drive cleanup. Stop pinging.
                     break
 
@@ -260,20 +242,17 @@ class LiveTranscriptionService:
                 logger.error(f"Error in transcript callback for session {session_id}: {e}")
 
         def on_error(self_dg, error, **kwargs):
-            # [PHASE0-DIAG] Log full error payload + session status so we can tell whether the
-            # error arrived while the session was paused (the symptom under investigation).
             logger.error(
-                f"[PHASE0-DIAG] Deepgram streaming ERROR for session {session_id} "
-                f"(pid={os.getpid()}, status={session.status}): {error!r}"
+                f"Deepgram streaming error for session {session_id} "
+                f"(status={session.status}): {error!r}"
             )
             session.message_queue.put({"type": "error", "message": str(error)})
 
         def on_close(self_dg, close, **kwargs):
-            # [PHASE0-DIAG] Log the close code/reason + session status. If status == "paused"
-            # here, Deepgram dropped the stream mid-pause despite KeepAlive — the prime suspect.
+            # status == "paused" here means Deepgram dropped the stream mid-pause despite
+            # KeepAlive — log it so any regression of the pause bug is visible.
             logger.info(
-                f"[PHASE0-DIAG] Deepgram connection CLOSED for session {session_id} "
-                f"(pid={os.getpid()}, status={session.status}, close={close!r}, kwargs={kwargs!r})"
+                f"Deepgram connection closed for session {session_id} (status={session.status})"
             )
             session._connection_alive = False
             session.stop_keepalive()
@@ -306,10 +285,7 @@ class LiveTranscriptionService:
         with self._lock:
             self.active_sessions[session_id] = session
 
-        logger.info(
-            f"[PHASE0-DIAG] Live transcription session STARTED: {session_id} "
-            f"(visit {visit_id}, pid={os.getpid()}) — compare this pid with the WS-connect pid"
-        )
+        logger.info(f"Live transcription session started: {session_id} (visit {visit_id})")
         return session
 
     def send_audio_chunk(self, session_id: str, audio_data: bytes) -> bool:
@@ -359,9 +335,8 @@ class LiveTranscriptionService:
         session.start_keepalive()
 
         logger.info(
-            f"[PHASE0-DIAG] Session {session_id} PAUSED (pid={os.getpid()}, "
-            f"pause_count={session.pause_count}, duration={session.duration_seconds}s) — "
-            f"browser audio stops now; KeepAlive thread is sole connection guard"
+            f"Session {session_id} paused "
+            f"(pause_count={session.pause_count}, duration={session.duration_seconds}s)"
         )
 
         return {
@@ -392,10 +367,7 @@ class LiveTranscriptionService:
         session.status = "active"
         session.paused_at = None
 
-        logger.info(
-            f"[PHASE0-DIAG] Session {session_id} RESUMED (pid={os.getpid()}, "
-            f"connection_alive={session._connection_alive}, duration={session.duration_seconds}s)"
-        )
+        logger.info(f"Session {session_id} resumed (duration={session.duration_seconds}s)")
 
         return {
             "session_id": session_id,
