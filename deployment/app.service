@@ -16,10 +16,15 @@ WorkingDirectory=/home/ec2-user/app/backend
 EnvironmentFile=/home/ec2-user/app/backend/.env
 
 # Application startup
+# NOTE: --workers 1 is REQUIRED. Live transcription sessions are held in an in-process,
+# in-memory dict (LiveTranscriptionService.active_sessions). With >1 worker, the REST
+# start-live call and the WebSocket can land on different worker processes, so the WS
+# would not find its session. Scaling out requires moving session state to a shared
+# store (e.g. Redis) first.
 ExecStart=/home/ec2-user/app/backend/venv/bin/uvicorn app.main:app \
     --host 0.0.0.0 \
     --port 8000 \
-    --workers 2 \
+    --workers 1 \
     --access-log \
     --log-level info
 

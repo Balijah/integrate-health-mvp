@@ -5,6 +5,7 @@ Manages live transcription sessions using Deepgram's streaming API.
 """
 
 import logging
+import os
 import threading
 import queue
 from datetime import datetime
@@ -39,19 +40,58 @@ class LiveTranscriptionSession:
         self._keepalive_thread: threading.Thread | None = None
         self._connection_alive: bool = True
 
+    # KeepAlive cadence. Deepgram closes a stream after ~10s without audio unless it
+    # receives a KeepAlive. We ping every 5s AND fire one immediately when the pause
+    # starts — the previous design waited a full 8s before the first ping, leaving an
+    # unprotected window in which Deepgram could (and did) drop the connection mid-pause.
+    KEEPALIVE_INTERVAL_SECONDS = 5
+
+    def _send_keepalive(self) -> bool:
+        """Send a single KeepAlive to Deepgram. Returns False if it could not be sent."""
+        if not self._connection_alive or self.connection is None:
+            return False
+        try:
+            self.connection.keep_alive()
+            return True
+        except Exception as e:
+            logger.warning(
+                f"[PHASE0-DIAG] KeepAlive send FAILED for session {self.session_id} "
+                f"(pid={os.getpid()}); Deepgram may drop the stream: {e!r}"
+            )
+            return False
+
     def start_keepalive(self) -> None:
         """Send periodic KeepAlive messages to Deepgram while paused to prevent timeout."""
         self._keepalive_stop.clear()
 
+        pid = os.getpid()
+        # Fire the FIRST keepalive synchronously, the instant audio stops, so there is no
+        # gap between the last audio frame and the first keepalive. This is the fix for the
+        # mid-pause Deepgram drop observed in the Phase 0 diagnostics.
+        sent_now = self._send_keepalive()
+        logger.info(
+            f"[PHASE0-DIAG] KeepAlive thread starting for session {self.session_id} "
+            f"(pid={pid}, interval={self.KEEPALIVE_INTERVAL_SECONDS}s, immediate_ping_sent={sent_now}, "
+            f"connection_alive={self._connection_alive})"
+        )
+
         def _loop():
-            while not self._keepalive_stop.wait(timeout=8):
+            ping = 1 if sent_now else 0
+            while not self._keepalive_stop.wait(timeout=self.KEEPALIVE_INTERVAL_SECONDS):
                 if not self._connection_alive:
+                    logger.info(
+                        f"[PHASE0-DIAG] KeepAlive loop exiting for session {self.session_id} "
+                        f"(pid={pid}) — connection no longer alive after {ping} ping(s)"
+                    )
                     break
-                try:
-                    if self.connection is not None:
-                        self.connection.keep_alive()
-                except Exception as e:
-                    logger.warning(f"KeepAlive send failed for session {self.session_id}: {e}")
+                if self._send_keepalive():
+                    ping += 1
+                    logger.info(
+                        f"[PHASE0-DIAG] KeepAlive ping #{ping} sent to Deepgram "
+                        f"for session {self.session_id} (pid={pid})"
+                    )
+                else:
+                    # Connection gone; on_close will drive cleanup. Stop pinging.
                     break
 
         self._keepalive_thread = threading.Thread(target=_loop, daemon=True)
@@ -220,11 +260,21 @@ class LiveTranscriptionService:
                 logger.error(f"Error in transcript callback for session {session_id}: {e}")
 
         def on_error(self_dg, error, **kwargs):
-            logger.error(f"Deepgram streaming error for session {session_id}: {error}")
+            # [PHASE0-DIAG] Log full error payload + session status so we can tell whether the
+            # error arrived while the session was paused (the symptom under investigation).
+            logger.error(
+                f"[PHASE0-DIAG] Deepgram streaming ERROR for session {session_id} "
+                f"(pid={os.getpid()}, status={session.status}): {error!r}"
+            )
             session.message_queue.put({"type": "error", "message": str(error)})
 
         def on_close(self_dg, close, **kwargs):
-            logger.info(f"Deepgram connection closed for session {session_id}")
+            # [PHASE0-DIAG] Log the close code/reason + session status. If status == "paused"
+            # here, Deepgram dropped the stream mid-pause despite KeepAlive — the prime suspect.
+            logger.info(
+                f"[PHASE0-DIAG] Deepgram connection CLOSED for session {session_id} "
+                f"(pid={os.getpid()}, status={session.status}, close={close!r}, kwargs={kwargs!r})"
+            )
             session._connection_alive = False
             session.stop_keepalive()
             session.message_queue.put({
@@ -256,7 +306,10 @@ class LiveTranscriptionService:
         with self._lock:
             self.active_sessions[session_id] = session
 
-        logger.info(f"Live transcription session started: {session_id} (visit {visit_id})")
+        logger.info(
+            f"[PHASE0-DIAG] Live transcription session STARTED: {session_id} "
+            f"(visit {visit_id}, pid={os.getpid()}) — compare this pid with the WS-connect pid"
+        )
         return session
 
     def send_audio_chunk(self, session_id: str, audio_data: bytes) -> bool:
@@ -305,7 +358,11 @@ class LiveTranscriptionService:
         session.pause_count += 1
         session.start_keepalive()
 
-        logger.info(f"Session {session_id} paused")
+        logger.info(
+            f"[PHASE0-DIAG] Session {session_id} PAUSED (pid={os.getpid()}, "
+            f"pause_count={session.pause_count}, duration={session.duration_seconds}s) — "
+            f"browser audio stops now; KeepAlive thread is sole connection guard"
+        )
 
         return {
             "session_id": session_id,
@@ -335,7 +392,10 @@ class LiveTranscriptionService:
         session.status = "active"
         session.paused_at = None
 
-        logger.info(f"Session {session_id} resumed")
+        logger.info(
+            f"[PHASE0-DIAG] Session {session_id} RESUMED (pid={os.getpid()}, "
+            f"connection_alive={session._connection_alive}, duration={session.duration_seconds}s)"
+        )
 
         return {
             "session_id": session_id,

@@ -742,10 +742,15 @@ async def stop_live_transcription(
     db_session.total_duration_seconds = result["total_duration_seconds"]
     await db.commit()
 
-    # Update visit with transcript
-    visit.transcript = result["transcript"]
+    # Update visit with transcript (append — see update_database_on_stop for rationale)
+    existing = (visit.transcript or "").strip()
+    new_transcript = result["transcript"]
+    if existing and new_transcript:
+        visit.transcript = f"{existing}\n{new_transcript}"
+    else:
+        visit.transcript = new_transcript or existing
     visit.transcription_status = "completed"
-    visit.audio_duration_seconds = result["total_duration_seconds"]
+    visit.audio_duration_seconds = (visit.audio_duration_seconds or 0) + result["total_duration_seconds"]
     await db.commit()
 
     return StopLiveTranscriptionResponse(

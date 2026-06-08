@@ -34,6 +34,7 @@ if [ "$SKIP_BACKEND" = false ]; then
     backend/app/ \
     backend/alembic/ \
     backend/requirements.txt \
+    deployment/app.service \
     deployment/worker.service
 
   echo "=== Uploading to S3 (deploy bucket) ==="
@@ -68,6 +69,8 @@ if [ "$SKIP_BACKEND" = false ]; then
       \"find /home/ec2-user/app/backend -name '._*' -delete 2>/dev/null || true\",
       \"tar -xzf /tmp/backend-deploy.tar.gz -C /home/ec2-user/app/ --strip-components=0\",
       \"cd /home/ec2-user/app/backend && source venv/bin/activate && alembic upgrade head 2>&1\",
+      \"sudo cp /home/ec2-user/app/deployment/app.service /etc/systemd/system/integrate-health.service\",
+      \"sudo systemctl daemon-reload\",
       \"sudo systemctl restart integrate-health\",
       \"sudo cp /home/ec2-user/app/deployment/worker.service /etc/systemd/system/integrate-health-worker.service\",
       \"sudo systemctl daemon-reload\",

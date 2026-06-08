@@ -114,16 +114,17 @@ export const useLiveTranscription = (
     return buffer
   }
 
-  // Start recording and transcription
-  const startRecording = useCallback(async () => {
-    try {
-      setError(null)
-      setTranscript([])
-      setDuration(0)
-      setStatus('connecting')
-
-      // Request microphone access
-      const stream = await navigator.mediaDevices.getUserMedia({
+  // Open a backend session + WebSocket and wire its handlers.
+  //   reconnect=false → fresh start (new audio graph)
+  //   reconnect=true  → recovery after the socket died (e.g. Deepgram dropped during a long
+  //                     pause). Keeps the accumulated transcript/duration and reuses the live
+  //                     audio graph; the backend appends to the already-saved transcript so
+  //                     nothing recorded before the drop is lost.
+  const connect = useCallback(async (reconnect: boolean) => {
+    // Reuse the mic stream if we still hold a live one (we keep it open across pauses).
+    let stream = streamRef.current
+    if (!stream || stream.getTracks().every((t) => t.readyState === 'ended')) {
+      stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
           sampleRate: sampleRate,
@@ -132,69 +133,90 @@ export const useLiveTranscription = (
         },
       })
       streamRef.current = stream
+    }
 
-      // Start session via REST API
-      const response = await startLiveTranscription(visitId, {
-        sample_rate: sampleRate,
-        encoding: 'linear16',
-      })
+    // Start session via REST API
+    const response = await startLiveTranscription(visitId, {
+      sample_rate: sampleRate,
+      encoding: 'linear16',
+    })
 
-      sessionIdRef.current = response.session_id
-      const websocketUrl = getWebSocketUrl(response.session_id)
+    sessionIdRef.current = response.session_id
 
-      // Create WebSocket connection
-      const ws = new WebSocket(websocketUrl)
-      wsRef.current = ws
+    // Create WebSocket connection
+    const ws = new WebSocket(getWebSocketUrl(response.session_id))
+    wsRef.current = ws
 
-      ws.onopen = () => {
-        console.log('WebSocket connected')
-        setIsConnected(true)
-        isConnectedRef.current = true
-        setStatus('active')
-        statusRef.current = 'active'
+    ws.onopen = () => {
+      console.log(reconnect ? '[recovery] WebSocket reconnected' : 'WebSocket connected')
+      setIsConnected(true)
+      isConnectedRef.current = true
+      setStatus('active')
+      statusRef.current = 'active'
+      setError(null) // clear any "connection interrupted" notice now that we're live again
 
-        // Start audio processing AFTER WebSocket is connected
-        startAudioProcessing(stream)
-
-        // Start duration timer
-        durationIntervalRef.current = window.setInterval(() => {
-          setDuration((prev) => prev + 1)
-        }, 1000)
+      // On reconnect the audio graph from before the drop is still live and will stream to
+      // the new socket automatically once status is 'active'; only build it if it's gone.
+      if (!reconnect || !processorRef.current || !audioContextRef.current) {
+        startAudioProcessing(stream!)
       }
 
-      ws.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data)
-          handleWebSocketMessage(message)
-        } catch (e) {
-          console.error('Error parsing WebSocket message:', e)
-        }
-      }
+      if (durationIntervalRef.current) clearInterval(durationIntervalRef.current)
+      durationIntervalRef.current = window.setInterval(() => {
+        setDuration((prev) => prev + 1)
+      }, 1000)
+    }
 
-      ws.onerror = (event) => {
-        console.error('WebSocket error:', event)
+    ws.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data)
+        handleWebSocketMessage(message)
+      } catch (e) {
+        console.error('Error parsing WebSocket message:', e)
+      }
+    }
+
+    ws.onerror = (event) => {
+      // [PHASE0-DIAG] Log status at the moment of error.
+      console.error(`[PHASE0-DIAG] WebSocket error (status=${statusRef.current}):`, event)
+      // Don't hard-fail into 'error' while paused — keep the session recoverable via Resume.
+      if (statusRef.current !== 'paused') {
         const errorMsg = 'WebSocket connection error'
         setError(errorMsg)
         setStatus('error')
         onError?.(errorMsg)
       }
+    }
 
-      ws.onclose = (event) => {
-        console.log('WebSocket closed:', event.code, event.reason)
-        setIsConnected(false)
-        isConnectedRef.current = false
-        if (statusRef.current === 'active') {
-          setStatus('stopped')
-        }
+    ws.onclose = (event) => {
+      // [PHASE0-DIAG] Capture close code/reason + status.
+      console.log(
+        `[PHASE0-DIAG] WebSocket closed (code=${event.code}, reason="${event.reason}", ` +
+        `wasClean=${event.wasClean}, status=${statusRef.current})`
+      )
+      setIsConnected(false)
+      isConnectedRef.current = false
+      if (statusRef.current === 'active') {
+        setStatus('stopped')
       }
+    }
+  }, [visitId, sampleRate, onError])
 
+  // Start recording and transcription
+  const startRecording = useCallback(async () => {
+    try {
+      setError(null)
+      setTranscript([])
+      setDuration(0)
+      setStatus('connecting')
+      await connect(false)
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to start recording'
       setError(errorMsg)
       setStatus('error')
       onError?.(errorMsg)
     }
-  }, [visitId, sampleRate, onError])
+  }, [connect, onError])
 
   // Start audio processing with Web Audio API
   const startAudioProcessing = (stream: MediaStream) => {
@@ -316,9 +338,31 @@ export const useLiveTranscription = (
 
       case 'error':
         const errorMsg = message.message || 'Unknown error'
-        console.error('Server error:', errorMsg)
+        // [PHASE0-DIAG] Server-side error forwarded to browser; log status to correlate with pause.
+        console.error(`[PHASE0-DIAG] Server error (status=${statusRef.current}):`, errorMsg)
         setError(errorMsg)
         onError?.(errorMsg)
+        break
+
+      case 'connection_closed':
+        // Backend signals the upstream Deepgram stream dropped. Keep the session in a 'paused',
+        // recoverable state (NOT 'error', which would hide the Resume button) and tell the user
+        // exactly what to do. Resume will transparently reconnect and continue.
+        console.warn(
+          `[recovery] connection_closed (status=${statusRef.current}): ${message.message || ''}`
+        )
+        if (statusRef.current === 'active' || statusRef.current === 'paused') {
+          setStatus('paused')
+          statusRef.current = 'paused'
+          setError(
+            'Recording connection was interrupted. Click Resume to reconnect and continue — ' +
+            'everything captured so far has been saved.'
+          )
+          if (durationIntervalRef.current) {
+            clearInterval(durationIntervalRef.current)
+            durationIntervalRef.current = null
+          }
+        }
         break
 
       case 'pong':
@@ -329,6 +373,12 @@ export const useLiveTranscription = (
 
   // Pause recording
   const pauseRecording = useCallback(() => {
+    // [PHASE0-DIAG] Log every pause attempt + the socket state, so we can see exactly when the
+    // browser stopped sending audio relative to any later disconnect.
+    console.log(
+      `[PHASE0-DIAG] pauseRecording() called (status=${statusRef.current}, ` +
+      `wsReadyState=${wsRef.current?.readyState})`
+    )
     if (statusRef.current === 'active' && wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'pause' }))
       setStatus('paused')
@@ -338,21 +388,49 @@ export const useLiveTranscription = (
         clearInterval(durationIntervalRef.current)
         durationIntervalRef.current = null
       }
+    } else {
+      console.warn('[PHASE0-DIAG] pauseRecording() no-op — not active or socket not open')
     }
   }, [])
 
   // Resume recording
-  const resumeRecording = useCallback(() => {
+  const resumeRecording = useCallback(async () => {
+    console.log(
+      `[PHASE0-DIAG] resumeRecording() called (status=${statusRef.current}, ` +
+      `wsReadyState=${wsRef.current?.readyState})`
+    )
+
+    // Healthy socket → resume the SAME session (transcript stays in one continuous stream).
     if (statusRef.current === 'paused' && wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'resume' }))
       setStatus('active')
       statusRef.current = 'active'
 
+      if (durationIntervalRef.current) clearInterval(durationIntervalRef.current)
       durationIntervalRef.current = window.setInterval(() => {
         setDuration((prev) => prev + 1)
       }, 1000)
+      return
     }
-  }, [])
+
+    // Socket is gone (the connection dropped during the pause). Recover by opening a NEW
+    // session and continuing — the backend appends to the transcript already saved, so the
+    // pre-pause portion is preserved. This replaces the old silent no-op.
+    if (statusRef.current === 'paused' || statusRef.current === 'error') {
+      console.warn('[recovery] Resume on a dead socket — opening a new session to continue')
+      setStatus('connecting')
+      statusRef.current = 'connecting'
+      try {
+        await connect(true)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to reconnect'
+        setError(`${msg}. Please click Stop to save what was captured, then start a new recording.`)
+        setStatus('paused') // stay recoverable so the user can retry Resume or Stop
+        statusRef.current = 'paused'
+        onError?.(msg)
+      }
+    }
+  }, [connect, onError])
 
   // Stop recording and get final transcript
   const stopRecording = useCallback(async (): Promise<string> => {

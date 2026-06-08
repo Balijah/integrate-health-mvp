@@ -7,6 +7,7 @@ Provides real-time bidirectional communication for audio streaming and transcrip
 import asyncio
 import base64
 import logging
+import os
 import uuid
 from datetime import datetime
 
@@ -58,11 +59,20 @@ async def update_database_on_stop(
                 visit = visit_result.scalar_one_or_none()
 
                 if visit:
-                    visit.transcript = transcript
+                    # Append rather than overwrite. If a session was lost mid-visit (e.g. the
+                    # connection dropped during a pause) its partial transcript is already saved
+                    # here; a later reconnect session must CONTINUE that text, not replace it,
+                    # because note generation reads the authoritative DB transcript.
+                    existing = (visit.transcript or "").strip()
+                    if existing and transcript:
+                        visit.transcript = f"{existing}\n{transcript}"
+                    else:
+                        visit.transcript = transcript or existing
+
                     visit.transcription_status = "completed"
-                    visit.audio_duration_seconds = duration
+                    visit.audio_duration_seconds = (visit.audio_duration_seconds or 0) + duration
                     if transcript_segments is not None:
-                        visit.transcript_segments = transcript_segments
+                        visit.transcript_segments = (visit.transcript_segments or []) + transcript_segments
 
                 await db.commit()
                 logger.info(f"Database updated for session {session_id}")
@@ -89,12 +99,20 @@ async def transcription_websocket(
     - Server -> Client: Transcript chunks, status updates, errors
     """
     await websocket.accept()
-    logger.info(f"WebSocket connected for session: {session_id}")
+    # [PHASE0-DIAG] Log the worker pid handling this WS. If it differs from the pid that
+    # logged "Session ... started" (the REST start-live call), the session lives on another
+    # worker and get_session() below will miss it — the multi-worker bug.
+    logger.info(f"[PHASE0-DIAG] WebSocket connected for session {session_id} (pid={os.getpid()})")
 
     service = get_live_transcription_service()
     session = service.get_session(session_id)
 
     if not session:
+        logger.warning(
+            f"[PHASE0-DIAG] Session {session_id} NOT FOUND on pid={os.getpid()} at WS connect — "
+            f"likely created on a different uvicorn worker (--workers 2). Known sessions here: "
+            f"{list(service.active_sessions.keys())}"
+        )
         await websocket.send_json({
             "type": "error",
             "message": f"Session {session_id} not found. Start a session first via REST API."
@@ -113,6 +131,13 @@ async def transcription_websocket(
                     try:
                         await websocket.send_json(msg)
                         if msg.get("type") == "connection_closed":
+                            # [PHASE0-DIAG] The browser socket is being closed because the
+                            # upstream Deepgram stream dropped. If this fires during a pause,
+                            # it explains the unresponsive Resume.
+                            logger.info(
+                                f"[PHASE0-DIAG] Forwarding connection_closed for session "
+                                f"{session_id} (pid={os.getpid()}); closing browser WS (1001)"
+                            )
                             await websocket.close(code=1001)
                             return
                     except Exception as e:
@@ -157,6 +182,9 @@ async def transcription_websocket(
                     })
 
             elif message_type == "pause":
+                logger.info(
+                    f"[PHASE0-DIAG] Received 'pause' for session {session_id} (pid={os.getpid()})"
+                )
                 try:
                     result = service.pause_session(session_id)
                     await websocket.send_json({
