@@ -149,7 +149,13 @@
       "Bash(PYTHONPATH=. /tmp/test-venv-313/bin/python -m pytest tests/test_notes.py tests/test_worker.py -v)",
       "Bash(PYTHONPATH=. /tmp/test-venv-313/bin/python -m pytest tests/test_worker.py::TestWorkerHandleGenerateNote -v --tb=short)",
       "Bash(/tmp/test-venv-313/bin/pytest backend/tests/test_notes.py backend/tests/test_worker.py -v --tb=short)",
-      "Bash(/tmp/test-venv-313/bin/pytest backend/tests/test_notes.py backend/tests/test_worker.py -v --tb=no)"
+      "Bash(/tmp/test-venv-313/bin/pytest backend/tests/test_notes.py backend/tests/test_worker.py -v --tb=no)",
+      "Bash(backend/venv/bin/pip show *)",
+      "Bash(python -m py_compile app/services/live_transcription.py app/api/websockets.py)",
+      "Bash(npx --no-install tsc --noEmit -p tsconfig.json)",
+      "Bash(echo \"RDS_AVAILABLE_NOW status=$\\(aws rds describe-db-instances --db-instance-identifier integrate-health-db --query 'DBInstances[0].DBInstanceStatus' --output text\\)\")",
+      "Bash(cd /Users/burhankhan/.claude/projects/-Users-burhankhan-Documents-integrate-health-mvp/memory)",
+      "Bash(cat MEMORY.md)"
     ]
   }
 }
