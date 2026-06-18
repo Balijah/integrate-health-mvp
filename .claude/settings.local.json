@@ -155,7 +155,11 @@
       "Bash(npx --no-install tsc --noEmit -p tsconfig.json)",
       "Bash(echo \"RDS_AVAILABLE_NOW status=$\\(aws rds describe-db-instances --db-instance-identifier integrate-health-db --query 'DBInstances[0].DBInstanceStatus' --output text\\)\")",
       "Bash(cd /Users/burhankhan/.claude/projects/-Users-burhankhan-Documents-integrate-health-mvp/memory)",
-      "Bash(cat MEMORY.md)"
+      "Bash(cat MEMORY.md)",
+      "Bash(./venv/bin/python -m pytest tests/ --tb=line -q)",
+      "mcp__claude_ai_Fireflies__fireflies_get_summary",
+      "mcp__claude_ai_Fireflies__fireflies_get_transcript",
+      "Bash(python -m py_compile app/services/note_generation.py)"
     ]
   }
 }

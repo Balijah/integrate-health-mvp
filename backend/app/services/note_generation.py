@@ -468,7 +468,9 @@ def generate_soap_note(transcript: str, additional_context: str = "") -> dict:
 
     try:
         # Initialize Bedrock client
+        _client_init_start = time.perf_counter()
         bedrock = _get_bedrock_client()
+        client_init_ms = round((time.perf_counter() - _client_init_start) * 1000, 1)
 
         # Build additional context block
         if additional_context and additional_context.strip():
@@ -508,6 +510,8 @@ def generate_soap_note(transcript: str, additional_context: str = "") -> dict:
             contentType="application/json",
             accept="application/json",
         )
+        # Time for the invoke call to return the stream handle (before any tokens).
+        invoke_handshake_ms = round((time.perf_counter() - _generation_start) * 1000, 1)
 
         # Accumulate text chunks and token usage from the streaming event sequence.
         # Bytes arrive continuously so the socket never goes cold — eliminating the
@@ -515,6 +519,7 @@ def generate_soap_note(transcript: str, additional_context: str = "") -> dict:
         text_chunks = []
         input_tokens = 0
         output_tokens = 0
+        _first_token_at = None  # perf_counter timestamp of the first text delta
 
         for event in response["body"]:
             chunk_bytes = event.get("chunk", {}).get("bytes")
@@ -526,14 +531,36 @@ def generate_soap_note(transcript: str, additional_context: str = "") -> dict:
             if event_type == "content_block_delta":
                 delta = event_data.get("delta", {})
                 if delta.get("type") == "text_delta":
+                    if _first_token_at is None:
+                        _first_token_at = time.perf_counter()
                     text_chunks.append(delta.get("text", ""))
             elif event_type == "message_start":
                 input_tokens = event_data.get("message", {}).get("usage", {}).get("input_tokens", 0)
             elif event_type == "message_delta":
                 output_tokens = event_data.get("usage", {}).get("output_tokens", 0)
 
+        _stream_end = time.perf_counter()
         response_text = "".join(text_chunks)
-        duration_seconds = round(time.perf_counter() - _generation_start, 2)
+        duration_seconds = round(_stream_end - _generation_start, 2)
+
+        # Timing breakdown to diagnose slow generation: TTFT (time from request
+        # fire to first visible token — input/queue/throttle bound) vs. streaming
+        # time (first to last token — output bound). Lumping these hides the cause.
+        ttft_ms = (
+            round((_first_token_at - _generation_start) * 1000, 1)
+            if _first_token_at is not None
+            else None
+        )
+        streaming_ms = (
+            round((_stream_end - _first_token_at) * 1000, 1)
+            if _first_token_at is not None
+            else None
+        )
+        output_tokens_per_sec = (
+            round(output_tokens / (streaming_ms / 1000), 1)
+            if streaming_ms and streaming_ms > 0 and output_tokens
+            else None
+        )
 
         if not response_text.strip():
             logger.error("[BEDROCK STREAM] Stream completed but produced no text content")
@@ -547,6 +574,13 @@ def generate_soap_note(transcript: str, additional_context: str = "") -> dict:
         logger.info(
             f"[BEDROCK RESPONSE] input_tokens={input_tokens} output_tokens={output_tokens} "
             f"response_len={len(response_text)} duration_seconds={duration_seconds}"
+        )
+        logger.info(
+            f"[SOAP TIMING] total_s={duration_seconds} ttft_ms={ttft_ms} "
+            f"streaming_ms={streaming_ms} tok_per_s={output_tokens_per_sec} "
+            f"client_init_ms={client_init_ms} invoke_handshake_ms={invoke_handshake_ms} "
+            f"input_tokens={input_tokens} output_tokens={output_tokens} "
+            f"transcript_len={len(transcript)}"
         )
         logger.info(f"[BEDROCK RAW RESPONSE]\n{response_text}")
 
@@ -586,6 +620,14 @@ def generate_soap_note(transcript: str, additional_context: str = "") -> dict:
                 "output_tokens": output_tokens,
             },
             "generation_duration_seconds": duration_seconds,
+            "timing": {
+                "total_seconds": duration_seconds,
+                "ttft_ms": ttft_ms,
+                "streaming_ms": streaming_ms,
+                "output_tokens_per_sec": output_tokens_per_sec,
+                "client_init_ms": client_init_ms,
+                "invoke_handshake_ms": invoke_handshake_ms,
+            },
         }
 
         logger.info("SOAP note generated successfully")
