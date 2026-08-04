@@ -15,6 +15,7 @@ from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession
 from app.config import get_settings
+from app.demo import ensure_external_services_enabled
 from app.models.visit import Visit
 from app.models.transcription_session import TranscriptionSession
 from app.services.transcription import TranscriptionError, transcribe_audio_file
@@ -223,6 +224,8 @@ async def start_transcription(
         HTTPException: 404 if visit not found
         HTTPException: 400 if no audio or already transcribed
     """
+    ensure_external_services_enabled()
+
     from app.config import get_settings
 
     settings = get_settings()
@@ -357,6 +360,8 @@ async def retry_transcription(
         HTTPException: 404 if visit not found
         HTTPException: 400 if transcription not failed
     """
+    ensure_external_services_enabled()
+
     from app.config import get_settings
 
     settings = get_settings()
@@ -437,6 +442,8 @@ async def start_live_transcription(
         HTTPException: 404 if visit not found
         HTTPException: 400 if visit already has active session
     """
+    ensure_external_services_enabled()
+
     # Verify visit exists and belongs to user
     result = await db.execute(
         select(Visit).where(
@@ -538,6 +545,8 @@ async def pause_live_transcription(
     Raises:
         HTTPException: 404 if visit or session not found
     """
+    ensure_external_services_enabled()
+
     # Verify visit exists and belongs to user
     result = await db.execute(
         select(Visit).where(
@@ -616,6 +625,8 @@ async def resume_live_transcription(
     Raises:
         HTTPException: 404 if visit or session not found
     """
+    ensure_external_services_enabled()
+
     # Verify visit exists and belongs to user
     result = await db.execute(
         select(Visit).where(
@@ -695,6 +706,8 @@ async def stop_live_transcription(
     Raises:
         HTTPException: 404 if visit or session not found
     """
+    ensure_external_services_enabled()
+
     # Verify visit exists and belongs to user
     result = await db.execute(
         select(Visit).where(

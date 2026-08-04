@@ -4,6 +4,7 @@ import { Eye, EyeOff } from 'lucide-react'
 
 import { useAuthStore } from '../store/authStore'
 import logoLoginImg from '../assets/logo-login.png'
+import { DEMO_MODE } from '../config/demo'
 
 export const Login = () => {
   const navigate = useNavigate()
@@ -100,11 +101,13 @@ export const Login = () => {
               </div>
             </div>
 
-            <div className="flex justify-end">
-              <Link to="/forgot-password" className="text-sm text-[#4ac6d6] hover:text-[#3ab5c5]">
-                forgot password?
-              </Link>
-            </div>
+            {!DEMO_MODE && (
+              <div className="flex justify-end">
+                <Link to="/forgot-password" className="text-sm text-[#4ac6d6] hover:text-[#3ab5c5]">
+                  forgot password?
+                </Link>
+              </div>
+            )}
 
             <button
               type="submit"

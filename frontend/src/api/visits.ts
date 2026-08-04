@@ -24,6 +24,14 @@ export interface UpdateVisitRequest {
   chief_complaint?: string
 }
 
+export interface TranscriptSegment {
+  speaker: string
+  text: string
+  start?: number
+  end?: number
+  confidence?: number
+}
+
 /**
  * Visit response data.
  */
@@ -36,6 +44,7 @@ export interface VisitResponse {
   audio_file_path: string | null
   audio_duration_seconds: number | null
   transcript: string | null
+  transcript_segments: TranscriptSegment[] | null
   transcription_status: string
   is_live_transcription: boolean
   transcription_session_id: string | null

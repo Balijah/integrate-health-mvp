@@ -14,6 +14,7 @@ from sqlalchemy import select
 
 from app.api.deps import DbSession
 from app.config import get_settings
+from app.demo import ensure_external_services_enabled
 from app.models.user import User
 from app.services.auth import hash_password
 
@@ -84,6 +85,8 @@ async def forgot_password(
     Request a password reset. Generates a reset token and attempts to email it.
     Always returns success to prevent email enumeration.
     """
+    ensure_external_services_enabled()
+
     result = await db.execute(
         select(User).where(User.email == request.email, User.is_active)
     )

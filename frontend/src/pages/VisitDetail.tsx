@@ -9,6 +9,8 @@ import { LiveRecorder } from '../components/LiveRecorder/LiveRecorder'
 import { TranscriptSegment } from '../hooks/useLiveTranscription'
 import { generateNote, getNote, syncSection, deleteNote, NoteResponse } from '../api/notes'
 import { useToast } from '../components/Toast/ToastContext'
+import { StoredTranscript } from '../components/StoredTranscript'
+import { DEMO_DISABLED_MESSAGE, DEMO_MODE } from '../config/demo'
 
 type Step = 0 | 1 | 2 // speak=0, summarize=1, sync=2
 
@@ -632,9 +634,9 @@ export const VisitDetail = () => {
           {note?.status === 'draft' && !isGeneratingNote && (
             <button
               onClick={handleRegenerateNote}
-              disabled={isRegenerating}
-              title="Re-generate summarization"
-              className="text-gray-400 hover:text-[#4ac6d6] transition-colors disabled:opacity-50"
+              disabled={isRegenerating || DEMO_MODE}
+              title={DEMO_MODE ? DEMO_DISABLED_MESSAGE : 'Re-generate summarization'}
+              className="text-gray-400 hover:text-[#4ac6d6] transition-colors disabled:cursor-not-allowed disabled:opacity-40"
             >
               <RotateCcw size={20} />
             </button>
@@ -713,22 +715,18 @@ export const VisitDetail = () => {
                       </div>
                     ))}
                   </div>
-                ) : visit.transcript ? (
-                  /* Plain text fallback from DB */
-                  <div className="bg-white border border-gray-200 rounded-2xl p-4 max-h-80 overflow-y-auto">
-                    <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{visit.transcript}</p>
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-400 italic text-center py-2">Loading transcript...</p>
-                )}
+                ) : <StoredTranscript segments={visit.transcript_segments} transcript={visit.transcript} />}
               </div>
             ) : visit.transcript ? (
               /* Transcript already in DB (re-loaded visit) — show it directly */
               <div className="space-y-3">
                 <p className="text-sm text-green-600">Recording complete. Transcript saved.</p>
-                <div className="bg-white border border-gray-200 rounded-2xl p-4 max-h-80 overflow-y-auto">
-                  <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{visit.transcript}</p>
-                </div>
+                <StoredTranscript segments={visit.transcript_segments} transcript={visit.transcript} />
+              </div>
+            ) : DEMO_MODE ? (
+              <div className="rounded-2xl border border-amber-300 bg-amber-50 p-8 text-center">
+                <p className="font-medium text-amber-900">Recording is unavailable in the synthetic demo.</p>
+                <p className="mt-2 text-sm text-amber-700">{DEMO_DISABLED_MESSAGE} Reset the demo to restore the flagship transcript.</p>
               </div>
             ) : (
               /* Live recorder — handles its own transcript display, controls, and status */
@@ -920,7 +918,8 @@ export const VisitDetail = () => {
                     value={summaryEmail}
                     onChange={e => { setSummaryEmail(e.target.value); if (sendEmailError) setSendEmailError(null) }}
                     placeholder="patient@email.com"
-                    className="flex-1 border border-gray-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-[#4ac6d6] italic text-gray-600 placeholder:text-gray-400"
+                    disabled={DEMO_MODE}
+                    className="flex-1 border border-gray-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-[#4ac6d6] italic text-gray-600 placeholder:text-gray-400 disabled:cursor-not-allowed disabled:bg-gray-50"
                   />
                   <button
                     onClick={() => window.print()}
@@ -942,12 +941,14 @@ export const VisitDetail = () => {
                       setSendEmailError(null)
                       setShowSendConfirm(true)
                     }}
-                    className="p-2 text-gray-500 hover:text-[#4ac6d6] transition-colors"
-                    title="Send to patient"
+                    disabled={DEMO_MODE}
+                    className="p-2 text-gray-500 hover:text-[#4ac6d6] transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+                    title={DEMO_MODE ? DEMO_DISABLED_MESSAGE : 'Send to patient'}
                   >
                     <Send size={20} />
                   </button>
                 </div>
+                {DEMO_MODE && <p className="mt-3 text-xs text-amber-700">Patient email is disabled for this synthetic demo.</p>}
               </div>
             )}
           </motion.div>

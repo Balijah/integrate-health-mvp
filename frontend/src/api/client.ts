@@ -7,6 +7,8 @@
 
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
 
+import { DEMO_MODE } from '../config/demo'
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 export const apiClient = axios.create({
@@ -102,7 +104,7 @@ apiClient.interceptors.response.use(
       }
     }
 
-    if (status === 403 && !isAuthEndpoint) {
+    if (status === 403 && !isAuthEndpoint && !DEMO_MODE) {
       localStorage.removeItem('token')
       localStorage.removeItem('refresh_token')
       window.location.href = '/login'

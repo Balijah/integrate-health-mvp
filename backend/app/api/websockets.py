@@ -21,6 +21,7 @@ from app.services.live_transcription import (
     get_live_transcription_service,
     LiveTranscriptionError,
 )
+from app.demo import DEMO_EXTERNAL_SERVICES_DISABLED
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,10 @@ async def transcription_websocket(
     - Client -> Server: Audio chunks (base64 encoded), control commands
     - Server -> Client: Transcript chunks, status updates, errors
     """
+    if get_settings().demo_mode:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason=DEMO_EXTERNAL_SERVICES_DISABLED)
+        return
+
     await websocket.accept()
     logger.info(f"WebSocket connected for session {session_id}")
 

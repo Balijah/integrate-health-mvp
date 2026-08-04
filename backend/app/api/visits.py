@@ -17,6 +17,7 @@ from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession
 from app.config import get_settings
+from app.demo import ensure_external_services_enabled
 from app.models.note import Note
 from app.models.visit import Visit
 from app.schemas.visit import (
@@ -342,6 +343,7 @@ async def upload_audio(
         HTTPException: 404 if visit not found
         HTTPException: 400 if file validation fails
     """
+    ensure_external_services_enabled()
     settings = get_settings()
 
     # Verify visit exists and belongs to user
@@ -461,6 +463,8 @@ async def send_summary(
     Returns:
         dict: Confirmation message
     """
+    ensure_external_services_enabled()
+
     if not request.summary.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

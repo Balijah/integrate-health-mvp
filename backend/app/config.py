@@ -5,6 +5,7 @@ Loads configuration from environment variables with sensible defaults.
 """
 
 from functools import lru_cache
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -15,6 +16,7 @@ class Settings(BaseSettings):
     app_name: str = "Integrate Health MVP"
     debug: bool = False
     environment: str = "production"
+    demo_mode: bool = False
 
     # Security
     app_secret_key: str = "dev-secret-key-change-in-production-min32"
@@ -72,6 +74,22 @@ class Settings(BaseSettings):
     upload_dir: str = "uploads"
     max_audio_size_mb: int = 100
     allowed_audio_formats: list[str] = ["wav", "mp3", "m4a", "webm", "ogg"]
+
+    @model_validator(mode="after")
+    def validate_demo_mode(self) -> "Settings":
+        """Fail closed when demo mode could reach production infrastructure."""
+        if not self.demo_mode:
+            return self
+
+        if self.environment.lower() not in {"development", "demo", "test"}:
+            raise ValueError("DEMO_MODE may only be enabled in development, demo, or test")
+        if self.storage_mode != "local":
+            raise ValueError("DEMO_MODE requires STORAGE_MODE=local")
+        if self.sqs_queue_url:
+            raise ValueError("DEMO_MODE requires SQS_QUEUE_URL to be empty")
+        if self.deepgram_api_key or self.anthropic_api_key or self.s3_bucket_name:
+            raise ValueError("DEMO_MODE requires external service credentials to be empty")
+        return self
 
     class Config:
         env_file = ".env"

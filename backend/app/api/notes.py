@@ -16,6 +16,7 @@ from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession
 from app.config import get_settings
+from app.demo import ensure_external_services_enabled
 from app.models.note import Note
 from app.models.visit import Visit
 from app.schemas.note import (
@@ -125,6 +126,8 @@ async def generate_note(
         HTTPException: 404 if visit not found
         HTTPException: 400 if transcript not available or note exists
     """
+    ensure_external_services_enabled()
+
     # Verify visit exists and belongs to user
     result = await db.execute(
         select(Visit).where(

@@ -19,6 +19,8 @@ import { createVisit, getVisits, VisitResponse } from '../../api/visits'
 import { apiClient } from '../../api/client'
 import logoFullImg from '../../assets/logo-full.jpg'
 import logoIconImg from '../../assets/logo-icon.png'
+import { DemoModeBanner } from '../DemoModeBanner'
+import { DEMO_MODE } from '../../config/demo'
 
 const VersionDisplay = () => {
   const [version, setVersion] = useState<string>('')
@@ -254,8 +256,10 @@ export const Layout = ({
             <VersionDisplay />
           )}
           <button
-            onClick={() => setShowSupportModal(true)}
-            className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-gray-600 hover:bg-gray-100 transition-colors overflow-hidden"
+            onClick={() => { if (!DEMO_MODE) setShowSupportModal(true) }}
+            disabled={DEMO_MODE}
+            title={DEMO_MODE ? 'External integrations are disabled in demo mode.' : undefined}
+            className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-gray-600 hover:bg-gray-100 transition-colors overflow-hidden disabled:cursor-not-allowed disabled:opacity-50"
           >
             <MessageCircle size={18} className="flex-shrink-0" />
             {!sidebarCollapsed && (
@@ -280,7 +284,9 @@ export const Layout = ({
       {/* Main area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
-        <header className="h-16 bg-white border-b border-gray-100 flex items-center justify-end px-6 gap-3 flex-shrink-0">
+        <header className="h-16 bg-white border-b border-gray-100 flex items-center justify-between px-6 gap-3 flex-shrink-0">
+          <DemoModeBanner />
+          <div className="flex items-center justify-end gap-3">
           {/* Error badge */}
           <AnimatePresence>
             {headerError && (
@@ -358,6 +364,7 @@ export const Layout = ({
               </div>
             )}
           </button>
+          </div>
         </header>
 
         {/* Page content */}

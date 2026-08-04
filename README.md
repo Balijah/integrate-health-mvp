@@ -150,6 +150,7 @@ See [docs/PHASES.md](docs/PHASES.md) for detailed implementation plan.
 - [docs/DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md) - Database schema
 - [docs/API_SPEC.md](docs/API_SPEC.md) - API specification
 - [docs/PHASES.md](docs/PHASES.md) - Implementation phases
+- [docs/DEMO_ENVIRONMENT.md](docs/DEMO_ENVIRONMENT.md) - Isolated local synthetic demo setup and reset
 
 ## License
 

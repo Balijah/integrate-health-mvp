@@ -9,6 +9,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.api.deps import CurrentUser
+from app.demo import ensure_external_services_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,8 @@ async def submit_support(
     Logs the support request with user info. In production,
     this should send emails to the support team.
     """
+    ensure_external_services_enabled()
+
     user_email = current_user.email
     user_name = current_user.full_name
     

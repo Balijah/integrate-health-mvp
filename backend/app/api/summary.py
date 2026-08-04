@@ -12,6 +12,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, EmailStr
 
 from app.api.deps import CurrentUser, DbSession
+from app.demo import ensure_external_services_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,8 @@ async def send_summary(
     IMPORTANT: Only sends the patient summary text.
     Does NOT send SOAP notes, transcripts, or any other visit data.
     """
+    ensure_external_services_enabled()
+
     provider_name = current_user.full_name
     
     logger.info(

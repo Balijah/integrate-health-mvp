@@ -1,0 +1,64 @@
+{
+  "fixture_notice": "Entirely synthetic demonstration data. Never replace with or derive from real patient information.",
+  "patient_ref": "SYNTHETIC-DEMO-001",
+  "chief_complaint": "Persistent fatigue, brain fog, and disrupted sleep",
+  "audio_duration_seconds": 1860,
+  "transcript_segments": [
+    {"speaker": "provider", "text": "Good morning. What would you most like us to focus on today?"},
+    {"speaker": "patient", "text": "For about six months I have felt exhausted even after a full night in bed. By midafternoon I have brain fog and struggle to finish work."},
+    {"speaker": "provider", "text": "Did this begin suddenly, and what makes it better or worse?"},
+    {"speaker": "patient", "text": "It built gradually after a very stressful project. Coffee helps briefly, but I crash later. A short walk usually clears my head a little."},
+    {"speaker": "provider", "text": "Tell me about sleep, including how long you sleep and whether you wake during the night."},
+    {"speaker": "patient", "text": "I go to bed around 10:30, wake near 2 or 3 most nights, and often take an hour to fall back asleep. I average about six hours and wake unrefreshed."},
+    {"speaker": "provider", "text": "Any snoring, morning headaches, chest pain, shortness of breath, fainting, fever, or unexplained weight loss?"},
+    {"speaker": "patient", "text": "My partner says I snore occasionally, but there have been no witnessed pauses. No morning headaches, chest pain, breathing trouble, fainting, fever, or weight loss."},
+    {"speaker": "provider", "text": "Walk me through meals, hydration, exercise, medicines, and supplements."},
+    {"speaker": "patient", "text": "Breakfast is often just coffee. Lunch may be late, then I crave something sweet around 3. I drink about four glasses of water. I walk twice a week. I take levothyroxine 50 micrograms every morning, magnesium glycinate 200 milligrams at night, and vitamin D3 2,000 international units daily. No medication allergies."},
+    {"speaker": "provider", "text": "Are you taking the levothyroxine separately from food and supplements?"},
+    {"speaker": "patient", "text": "I take it with coffee and usually take magnesium about twenty minutes later. I did not realize they should be separated."},
+    {"speaker": "provider", "text": "Your synthetic demonstration labs from last week show TSH 4.8, free T4 0.9, ferritin 24, vitamin D 31, fasting glucose 102, and hemoglobin 13.1. Your thyroid exam today is normal. Blood pressure is 118 over 74, pulse 72, temperature 98.2, and weight 154 pounds."},
+    {"speaker": "patient", "text": "Could the timing of my thyroid medicine be part of this? My mother also has hypothyroidism."},
+    {"speaker": "provider", "text": "It may contribute because coffee, food, and magnesium can reduce absorption, but the fatigue is likely multifactorial. Sleep fragmentation, inconsistent meals, low hydration, borderline iron stores, and workload stress are also relevant."},
+    {"speaker": "provider", "text": "Take levothyroxine with water on an empty stomach and wait 30 to 60 minutes before coffee or food. Separate magnesium by at least four hours. Continue the current dose until we repeat TSH and free T4 in six weeks."},
+    {"speaker": "provider", "text": "For the next month, eat a protein-containing breakfast, avoid skipping lunch, increase water gradually toward eight glasses daily, and take a ten-minute walk after lunch on at least five days each week. Continue magnesium and vitamin D at current doses."},
+    {"speaker": "provider", "text": "We will also order a complete blood count, ferritin with iron studies, B12, folate, comprehensive metabolic panel, and repeat thyroid labs. Keep a two-week sleep and energy log. If snoring worsens or pauses are witnessed, we will consider a sleep evaluation. Follow up in six weeks, sooner for chest pain, fainting, shortness of breath, or rapidly worsening symptoms."},
+    {"speaker": "patient", "text": "That feels manageable. I will change the medication timing and start the log today."}
+  ],
+  "soap_note": {
+    "subjective": {
+      "reason_for_visit": "Six months of persistent fatigue, afternoon brain fog, and nonrestorative sleep.",
+      "history_of_present_illness": "Patient reports gradual onset of fatigue and cognitive clouding after a prolonged high-stress work project. Symptoms are most limiting by midafternoon and interfere with completing work. Coffee provides brief improvement followed by an energy crash; short walks provide modest relief. Sleep is fragmented by near-nightly awakening around 2–3 AM with up to one hour required to return to sleep. Patient averages approximately six hours and wakes unrefreshed. Meals are inconsistent, breakfast is often coffee alone, lunch may be delayed, and afternoon sugar cravings occur around 3 PM. Hydration is approximately four glasses of water daily. Patient takes levothyroxine with coffee and magnesium about 20 minutes later, creating a potential absorption issue.",
+      "review_of_systems": "Constitutional: fatigue; no fever or unexplained weight loss\nNeurological: afternoon brain fog; no syncope or morning headaches\nCardiovascular: no chest pain\nRespiratory: occasional snoring; no witnessed apneas or shortness of breath\nSleep: sleep-maintenance insomnia and nonrestorative sleep",
+      "past_medical_history": "Hypothyroidism.",
+      "current_medications": ["Levothyroxine 50 mcg every morning; currently taken with coffee"],
+      "current_supplements": ["Magnesium glycinate 200 mg nightly", "Vitamin D3 2,000 IU daily"],
+      "allergies": ["No known medication allergies"],
+      "social_history": "High recent workload stress. Walks for exercise approximately twice weekly. Frequently skips breakfast and delays lunch.",
+      "family_history": "Mother with hypothyroidism."
+    },
+    "objective": {
+      "vitals": {"blood_pressure": "118/74 mmHg", "heart_rate": "72 bpm", "temperature": "98.2 °F", "weight": "154 lb"},
+      "physical_exam": "Thyroid examination described as normal.",
+      "lab_results": "Synthetic demonstration results: TSH 4.8, free T4 0.9, ferritin 24, vitamin D 31, fasting glucose 102, hemoglobin 13.1."
+    },
+    "assessment": {
+      "diagnoses": ["Fatigue, likely multifactorial", "Brain fog", "Sleep-maintenance insomnia", "Hypothyroidism with possible medication absorption interference", "Borderline low iron stores", "Inconsistent meal pattern and suboptimal hydration"],
+      "clinical_discussion": [
+        {"issue": "Fatigue and brain fog", "findings": "Six-month gradual course, afternoon predominance, functional impact at work, transient response to coffee, and modest improvement with walking.", "interpretation": "Likely multifactorial in the context of fragmented sleep, nutrition and hydration patterns, workload stress, thyroid replacement timing, and borderline iron stores.", "plan_summary": "Address modifiable lifestyle and medication-timing factors and evaluate metabolic, hematologic, nutrient, and thyroid contributors."},
+        {"issue": "Hypothyroidism", "findings": "TSH 4.8 and free T4 0.9 while taking levothyroxine with coffee and magnesium shortly afterward.", "interpretation": "Administration timing may reduce levothyroxine absorption; current evidence does not support an immediate dose change.", "plan_summary": "Correct administration timing and repeat TSH/free T4 in six weeks before reconsidering dose."},
+        {"issue": "Sleep disruption", "findings": "Nightly awakening around 2–3 AM, approximately six hours of sleep, unrefreshed awakening, and occasional snoring without witnessed apnea.", "interpretation": "Sleep fragmentation likely contributes to daytime symptoms; sleep-disordered breathing is not established but should be monitored.", "plan_summary": "Track sleep for two weeks and consider sleep evaluation if snoring worsens or witnessed apneas occur."}
+      ],
+      "clinical_reasoning": "The symptom pattern does not identify a single cause. Medication absorption, thyroid status, iron stores, sleep continuity, meal timing, hydration, activity, and stress all warrant coordinated evaluation. Pertinent negatives reduce concern for an immediately unstable cardiopulmonary or systemic process based on this synthetic encounter."
+    },
+    "plan": {
+      "prescriptions": {"continue": ["Levothyroxine 50 mcg every morning; take with water on an empty stomach, wait 30–60 minutes before coffee or food, and separate magnesium by at least four hours"]},
+      "supplements": {"continue": ["Magnesium glycinate 200 mg nightly", "Vitamin D3 2,000 IU daily"]},
+      "lab_orders": ["TSH and free T4 in six weeks", "Complete blood count", "Ferritin and iron studies", "Vitamin B12 and folate", "Comprehensive metabolic panel"],
+      "imaging_or_referrals": ["Consider sleep evaluation if snoring worsens or witnessed apneas develop"],
+      "lifestyle_recommendations": "Eat a protein-containing breakfast, avoid skipping lunch, gradually increase water intake toward eight glasses daily, walk for ten minutes after lunch at least five days weekly, and keep a two-week sleep and energy log.",
+      "patient_education": "Reviewed factors that interfere with levothyroxine absorption and explained that fatigue is likely multifactorial. Seek earlier assessment for chest pain, fainting, shortness of breath, or rapidly worsening symptoms.",
+      "follow_up": "Follow up in six weeks after repeat testing, or sooner for worsening symptoms."
+    },
+    "metadata": {"generated_at": "synthetic fixture", "model_version": "pre-seeded demo", "confidence_score": 1.0}
+  }
+}
