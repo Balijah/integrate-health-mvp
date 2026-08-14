@@ -6,6 +6,7 @@ import { Check, Trash2, Printer, Send, ChevronDown, RotateCcw } from 'lucide-rea
 import { useTranscriptionPolling } from '../hooks/useTranscriptionPolling'
 import { getVisit, updateVisit, deleteVisit, retryTranscription, VisitResponse } from '../api/visits'
 import { LiveRecorder } from '../components/LiveRecorder/LiveRecorder'
+import { DemoLiveRecorder } from '../components/LiveRecorder/DemoLiveRecorder'
 import { TranscriptSegment } from '../hooks/useLiveTranscription'
 import { generateNote, getNote, syncSection, deleteNote, NoteResponse } from '../api/notes'
 import { useToast } from '../components/Toast/ToastContext'
@@ -342,7 +343,7 @@ export const VisitDetail = () => {
         setVisit(v)
         setVisitDateDraft(v.visit_date)
         // Advance to summarize step only if transcription is in progress or done
-        if ((v.audio_file_path || v.transcript) && v.transcription_status !== 'failed') {
+        if (!DEMO_MODE && (v.audio_file_path || v.transcript) && v.transcription_status !== 'failed') {
           setCurrentStep(1)
         }
       })
@@ -717,6 +718,11 @@ export const VisitDetail = () => {
                   </div>
                 ) : <StoredTranscript segments={visit.transcript_segments} transcript={visit.transcript} />}
               </div>
+            ) : DEMO_MODE && visit.transcript_segments?.length ? (
+              <DemoLiveRecorder
+                segments={visit.transcript_segments}
+                onComplete={() => setLiveRecordingDone(true)}
+              />
             ) : visit.transcript ? (
               /* Transcript already in DB (re-loaded visit) — show it directly */
               <div className="space-y-3">
@@ -754,7 +760,7 @@ export const VisitDetail = () => {
             )}
 
             {/* Advance button when transcript is ready (batch or live) */}
-            {(liveRecordingDone || visit.transcript || polling.transcript) && (
+            {(liveRecordingDone || (!DEMO_MODE && (visit.transcript || polling.transcript))) && (
               <button
                 onClick={() => setCurrentStep(1)}
                 className="w-full border-2 border-[#4ac6d6] text-[#4ac6d6] rounded-xl py-3 hover:bg-[#4ac6d6]/10 transition-colors"
