@@ -31,6 +31,7 @@ htmlcov/
 # Virtual environments
 venv/
 .venv/
+.venv*/
 ENV/
 env/
 .env
@@ -63,6 +64,7 @@ Thumbs.db
 .env.local
 .env.*.local
 *.env
+docker-compose.override.yml
 
 # Logs
 logs/

@@ -3,13 +3,15 @@ Tests for note endpoints.
 """
 
 import json
+from unittest.mock import MagicMock, patch
+
 import pytest
 import pytest_asyncio
-from httpx import AsyncClient
-from unittest.mock import patch, MagicMock
 from botocore.exceptions import ClientError, EventStreamError
+from httpx import AsyncClient
 
-from app.services.note_generation import generate_soap_note, NoteGenerationError
+from app.api.notes import _render_patient_summary_pdf
+from app.services.note_generation import NoteGenerationError, generate_soap_note
 
 
 @pytest.mark.asyncio
@@ -72,8 +74,9 @@ class TestNoteWithExistingNote:
         """Create a visit with an existing note."""
         import uuid
         from datetime import datetime
-        from app.models.visit import Visit
+
         from app.models.note import Note
+        from app.models.visit import Visit
 
         visit = Visit(
             id=uuid.uuid4(),
@@ -225,6 +228,64 @@ class TestNoteWithExistingNote:
         data = response.json()
         assert data["format"] == "json"
 
+    async def test_export_patient_summary_pdf(
+        self, client: AsyncClient, auth_headers, visit_with_note
+    ):
+        """Patient summary export returns a private, downloadable PDF."""
+        visit = visit_with_note["visit"]
+        note = visit_with_note["note"]
+
+        response = await client.post(
+            f"/api/v1/visits/{visit.id}/notes/{note.id}/export/pdf",
+            headers=auth_headers,
+            json={
+                "patient_summary": (
+                    "Today we reviewed your fatigue.\n\n"
+                    "Medications:\n- Take levothyroxine with water."
+                )
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/pdf"
+        assert response.headers["content-disposition"] == (
+            'attachment; filename="patient-summary-PT-NOTE-001.pdf"'
+        )
+        assert response.headers["cache-control"] == "private, no-store"
+        assert response.headers["pragma"] == "no-cache"
+        assert response.content.startswith(b"%PDF-")
+
+    async def test_export_patient_summary_pdf_rejects_empty_summary(
+        self, client: AsyncClient, auth_headers, visit_with_note
+    ):
+        """Whitespace-only summaries are rejected before rendering."""
+        visit = visit_with_note["visit"]
+        note = visit_with_note["note"]
+
+        response = await client.post(
+            f"/api/v1/visits/{visit.id}/notes/{note.id}/export/pdf",
+            headers=auth_headers,
+            json={"patient_summary": "   \n  "},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Patient summary is empty"
+
+    async def test_export_patient_summary_pdf_rejects_note_from_other_visit(
+        self, client: AsyncClient, auth_headers, visit_with_note, test_visit
+    ):
+        """A note cannot be exported through a different owned visit URL."""
+        note = visit_with_note["note"]
+
+        response = await client.post(
+            f"/api/v1/visits/{test_visit.id}/notes/{note.id}/export/pdf",
+            headers=auth_headers,
+            json={"patient_summary": "Do not export this."},
+        )
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Note not found"
+
 
 # ---------------------------------------------------------------------------
 # Streaming unit tests — call generate_soap_note() directly, mock boto3
@@ -332,3 +393,33 @@ class TestGenerateSoapNoteStreaming:
             generate_soap_note("")
 
         assert "empty" in str(exc_info.value).lower()
+
+
+class TestPatientSummaryPdfRendering:
+    """Focused unit tests for synchronous ReportLab rendering."""
+
+    def test_renders_structured_text_and_escapes_markup(self):
+        pdf = _render_patient_summary_pdf(
+            summary_text=(
+                "A <safe> summary & next steps.\n\n"
+                "Medications:\n- Take medication as directed.\n"
+                "Watch For:\n- New or worsening symptoms"
+            ),
+            patient_ref="SYNTHETIC-DEMO-001",
+            visit_date=None,
+            logo_path=None,
+        )
+
+        assert pdf.startswith(b"%PDF-")
+        assert len(pdf) > 1000
+
+    def test_renders_multiple_pages_and_ignores_missing_logo(self):
+        pdf = _render_patient_summary_pdf(
+            summary_text="\n".join(f"- Synthetic instruction {index}" for index in range(300)),
+            patient_ref="SYNTHETIC-DEMO-001",
+            visit_date=None,
+            logo_path="/path/that/does/not/exist.png",
+        )
+
+        assert pdf.startswith(b"%PDF-")
+        assert pdf.count(b"/Type /Page") >= 2

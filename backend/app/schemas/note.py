@@ -117,6 +117,16 @@ class NoteExportRequest(BaseModel):
     )
 
 
+class PatientSummaryPdfRequest(BaseModel):
+    """Request schema for exporting the patient summary as a branded PDF."""
+
+    patient_summary: str = Field(
+        ...,
+        max_length=20000,
+        description="The (possibly edited) patient-facing summary text to render in the PDF",
+    )
+
+
 class NoteResponse(BaseModel):
     """Response schema for note data."""
 

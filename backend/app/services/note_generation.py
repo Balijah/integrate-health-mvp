@@ -198,6 +198,29 @@ Because these visits may include complex functional medicine care, pay close att
 Do not dismiss or omit functional medicine context simply because it is not conventional documentation.
 
 --------------------------------------------------
+PATIENT-FACING SUMMARY REQUIREMENTS
+--------------------------------------------------
+
+In addition to the SOAP note, generate a patient_summary section at the same time, in the same JSON response.
+
+This section is written for the patient, not the provider. It is a clean, professional, easy-to-read summary of the plan discussed during the visit.
+
+Rules:
+- Use plain, everyday language a patient can understand. Avoid clinical jargon.
+- Keep the tone warm, professional, and clear.
+- Use short bullet points.
+- Focus on what the patient should DO next, not clinical reasoning.
+- Do not include any recommendations that were not discussed in the transcript.
+- Preserve exact medication and supplement names, doses, and instructions when provided.
+- Group items into clean sections (plan_sections) using headings such as:
+  Medications, Supplements, Labs & Testing, Imaging & Referrals, Lifestyle & Nutrition.
+- Omit any section, bullet, or field that does not apply — never output empty values or placeholders.
+- watch_for: symptoms, warning signs, or things the patient should monitor (omit if none discussed).
+- follow_up: clear follow-up instructions such as next appointment timing (omit if none discussed).
+- visit_summary: 1-3 warm, plain-language sentences summarizing today's visit.
+- The patient should be able to read this and clearly understand their next steps.
+
+--------------------------------------------------
 OUTPUT FORMAT
 --------------------------------------------------
 
@@ -292,6 +315,18 @@ IMPORTANT: Values shown in [brackets] below are field descriptions only — neve
     "lifestyle_recommendations": "[omit if not mentioned]",
     "patient_education": "[omit if not mentioned]",
     "follow_up": "[omit if not mentioned]"
+  }},
+  "patient_summary": {{
+    "title": "Your Care Plan",
+    "visit_summary": "[brief patient-friendly summary of today's visit]",
+    "plan_sections": [
+      {{
+        "heading": "[section heading, e.g. Medications, Supplements, Labs & Testing]",
+        "items": ["[clear patient-facing bullet point]"]
+      }}
+    ],
+    "watch_for": ["[symptoms, warning signs, or things to monitor — omit array if none]"],
+    "follow_up": ["[follow-up instructions — omit array if none]"]
   }}
 }}
 ```
