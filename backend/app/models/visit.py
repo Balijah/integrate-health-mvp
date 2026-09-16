@@ -6,12 +6,18 @@ Stores visit information including audio files and transcripts.
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+
+if TYPE_CHECKING:
+    from app.models.note import Note
+    from app.models.transcription_session import TranscriptionSession
+    from app.models.user import User
 
 
 class Visit(Base):
