@@ -1,6 +1,7 @@
 name: CI — Test & Lint
 
 on:
+  workflow_call:
   push:
     branches: ["**"]
   pull_request:
