@@ -25,7 +25,8 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/integrate_health_test
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/integrate_health_test
+      TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/integrate_health_test
       APP_ENV: test
       APP_SECRET_KEY: test-secret-key-not-real-32-chars-min
       JWT_SECRET_KEY: test-jwt-secret-key-not-real-32-chars
