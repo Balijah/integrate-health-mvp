@@ -22,6 +22,11 @@ def _make_sqs_message(body: dict, receipt: str = "receipt-handle-abc") -> dict:
     }
 
 
+def _close_coroutine(coroutine):
+    """Close a mocked coroutine so tests do not leak unawaited objects."""
+    coroutine.close()
+
+
 # ---------------------------------------------------------------------------
 # Tests: API enqueue path
 # ---------------------------------------------------------------------------
@@ -186,7 +191,10 @@ class TestWorkerLoop:
                 mock_settings.return_value.aws_region = "us-east-1"
                 mock_settings.return_value.sqs_queue_url = "https://sqs/queue"
                 mock_settings.return_value.database_url = "postgresql+asyncpg://localhost/test"
-                with patch("app.worker.asyncio.run"):  # don't actually run the handler
+                with patch(
+                    "app.worker.asyncio.run",
+                    side_effect=_close_coroutine,
+                ):
                     from app import worker as worker_mod
                     worker_mod._shutdown.clear()
                     worker_mod.run_worker()
@@ -220,7 +228,11 @@ class TestWorkerLoop:
                 mock_settings.return_value.aws_region = "us-east-1"
                 mock_settings.return_value.sqs_queue_url = "https://sqs/queue"
                 mock_settings.return_value.database_url = "postgresql+asyncpg://localhost/test"
-                with patch("app.worker.asyncio.run", side_effect=RuntimeError("DB exploded")):
+                def fail_after_closing(coroutine):
+                    _close_coroutine(coroutine)
+                    raise RuntimeError("DB exploded")
+
+                with patch("app.worker.asyncio.run", side_effect=fail_after_closing):
                     worker_mod._shutdown.clear()
                     worker_mod.run_worker()
 

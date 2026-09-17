@@ -1,0 +1,4 @@
+[lint]
+# Preserve the repository's intended core error rules instead of inheriting
+# Ruff's evolving default selection.
+select = ["E4", "E7", "E9", "F"]
