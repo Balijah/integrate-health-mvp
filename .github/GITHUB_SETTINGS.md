@@ -20,19 +20,14 @@ Settings → Branches → Add rule → Branch name pattern: `main`
 
 ---
 
-## Secrets — for CD Workflow
-Settings → Secrets and variables → Actions → New repository secret
+## AWS Authentication — OIDC
 
-| Secret Name           | Value |
-|-----------------------|-------|
-| AWS_ACCESS_KEY_ID     | AWS access key that has SSM, S3, and CloudFront permissions |
-| AWS_SECRET_ACCESS_KEY | Corresponding secret key |
-| AWS_REGION            | e.g., us-east-1 |
+The CD workflow uses GitHub OIDC to assume this short-lived AWS role:
 
-These are the same AWS credentials you use locally for deploy.sh.
-Consider creating a dedicated IAM user for GitHub Actions with only the
-permissions deploy.sh needs: SSM SendCommand, S3 PutObject/GetObject,
-CloudFront CreateInvalidation.
+`arn:aws:iam::317440775804:role/IntegrateHealthGitHubActionsDeploy`
+
+The role trust policy only accepts tokens from this repository's protected
+`production` environment. No long-lived AWS access keys are stored in GitHub.
 
 ---
 
