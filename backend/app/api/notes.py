@@ -7,11 +7,12 @@ Handles SOAP note generation, retrieval, and export.
 import asyncio
 import json
 import logging
+import os
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 import boto3
-from fastapi import APIRouter, BackgroundTasks, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Response, status
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession
@@ -25,13 +26,14 @@ from app.schemas.note import (
     NoteExportResponse,
     NoteResponse,
     NoteUpdateRequest,
+    PatientSummaryPdfRequest,
     SyncSectionRequest,
     SyncSectionResponse,
 )
 from app.services.note_generation import (
-    generate_soap_note,
     format_note_as_markdown,
     format_note_as_text,
+    generate_soap_note,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,7 +60,11 @@ async def _run_note_generation(
     note_id: str, transcript: str, additional_context: str, database_url: str
 ) -> None:
     """Background task: run Bedrock generation and update the note record."""
-    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+    from sqlalchemy.ext.asyncio import (
+        AsyncSession,
+        async_sessionmaker,
+        create_async_engine,
+    )
 
     engine = create_async_engine(database_url)
     session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -485,6 +491,189 @@ async def export_note(
         note_id=note_id,
         format=request.format,
         content=content,
+    )
+
+
+def _render_patient_summary_pdf(
+    *,
+    summary_text: str,
+    patient_ref: str,
+    visit_date: datetime | None,
+    logo_path: str | None,
+) -> bytes:
+    """Render the patient-facing summary text into a logo-branded PDF (synchronous)."""
+    from io import BytesIO
+    from xml.sax.saxutils import escape
+
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import inch
+    from reportlab.platypus import (
+        HRFlowable,
+        Image,
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+    )
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        leftMargin=0.9 * inch,
+        rightMargin=0.9 * inch,
+        topMargin=0.8 * inch,
+        bottomMargin=0.8 * inch,
+        title="Patient Summary",
+    )
+
+    styles = getSampleStyleSheet()
+    teal = colors.HexColor("#4ac6d6")
+    title_style = ParagraphStyle(
+        "PSTitle", parent=styles["Title"], fontSize=20,
+        textColor=colors.HexColor("#222222"), spaceAfter=4, alignment=0,
+    )
+    meta_style = ParagraphStyle(
+        "PSMeta", parent=styles["Normal"], fontSize=10,
+        textColor=colors.HexColor("#666666"),
+    )
+    heading_style = ParagraphStyle(
+        "PSHeading", parent=styles["Heading2"], fontSize=13,
+        textColor=teal, spaceBefore=12, spaceAfter=4, keepWithNext=True,
+    )
+    body_style = ParagraphStyle(
+        "PSBody", parent=styles["Normal"], fontSize=11, leading=16, spaceAfter=4,
+    )
+    bullet_style = ParagraphStyle(
+        "PSBullet", parent=body_style, leftIndent=16, bulletIndent=4,
+    )
+
+    flow = []
+
+    # Logo (graceful fallback: skip if the image can't be loaded)
+    if logo_path:
+        try:
+            img = Image(logo_path)
+            max_w, max_h = 2.0 * inch, 0.9 * inch
+            iw, ih = float(img.imageWidth), float(img.imageHeight)
+            scale = min(max_w / iw, max_h / ih)
+            img.drawWidth = iw * scale
+            img.drawHeight = ih * scale
+            img.hAlign = "LEFT"
+            flow.append(img)
+            flow.append(Spacer(1, 10))
+        except Exception:  # noqa: BLE001 - invalid image data must not block the PDF
+            logger.warning("[PDF] Could not load logo at %s — rendering without logo", logo_path)
+
+    flow.append(Paragraph("Your Care Plan", title_style))
+
+    meta_bits = []
+    if patient_ref:
+        meta_bits.append(f"Patient: {escape(str(patient_ref))}")
+    if visit_date:
+        meta_bits.append(f"Visit Date: {visit_date.strftime('%B %d, %Y')}")
+    if meta_bits:
+        flow.append(Paragraph(" &nbsp;|&nbsp; ".join(meta_bits), meta_style))
+
+    flow.append(Spacer(1, 8))
+    flow.append(HRFlowable(width="100%", thickness=1, color=teal, spaceAfter=10))
+
+    # Render the (possibly edited) summary text line by line, preserving structure.
+    for raw_line in summary_text.split("\n"):
+        stripped = raw_line.strip()
+        if not stripped:
+            flow.append(Spacer(1, 6))
+            continue
+        if stripped[:1] in ("-", "•", "*"):
+            flow.append(Paragraph(escape(stripped[1:].strip()), bullet_style, bulletText="•"))
+        elif stripped.endswith(":") and len(stripped) <= 40:
+            flow.append(Paragraph(escape(stripped[:-1]), heading_style))
+        else:
+            flow.append(Paragraph(escape(stripped), body_style))
+
+    doc.build(flow)
+    pdf = buffer.getvalue()
+    buffer.close()
+    return pdf
+
+
+@router.post(
+    "/{visit_id}/notes/{note_id}/export/pdf",
+    summary="Export patient summary as branded PDF",
+    description="Render the patient-facing summary as a logo-branded PDF for printing/handout.",
+)
+async def export_patient_summary_pdf(
+    visit_id: uuid.UUID,
+    note_id: uuid.UUID,
+    request: PatientSummaryPdfRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> Response:
+    """Export the patient-facing summary as a logo-branded PDF."""
+    # Verify visit exists and belongs to user
+    visit_result = await db.execute(
+        select(Visit).where(
+            Visit.id == visit_id,
+            Visit.user_id == current_user.id,
+        )
+    )
+    visit = visit_result.scalar_one_or_none()
+    if visit is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Visit not found",
+        )
+
+    # Verify note exists for this visit
+    note_result = await db.execute(
+        select(Note).where(
+            Note.id == note_id,
+            Note.visit_id == visit_id,
+        )
+    )
+    if note_result.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Note not found",
+        )
+
+    summary_text = (request.patient_summary or "").strip()
+    if not summary_text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Patient summary is empty",
+        )
+
+    # Resolve the logo from the provider's profile picture (graceful fallback if absent).
+    # Profile pictures are always stored locally at uploads/profiles/ (see profile.py).
+    settings = get_settings()
+    logo_path = None
+    pic_url = current_user.profile_picture_url
+    if pic_url and pic_url.startswith("/uploads/"):
+        candidate = os.path.join(settings.upload_dir, "profiles", os.path.basename(pic_url))
+        if os.path.isfile(candidate):
+            logo_path = candidate
+
+    # ReportLab is synchronous; run off the event loop (single uvicorn worker).
+    pdf_bytes = await asyncio.to_thread(
+        _render_patient_summary_pdf,
+        summary_text=summary_text,
+        patient_ref=visit.patient_ref,
+        visit_date=visit.visit_date,
+        logo_path=logo_path,
+    )
+
+    safe_ref = "".join(c if c.isalnum() or c in "-_" else "_" for c in str(visit.patient_ref))
+    filename = f"patient-summary-{safe_ref or 'visit'}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "private, no-store",
+            "Pragma": "no-cache",
+        },
     )
 
 

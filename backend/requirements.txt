@@ -40,3 +40,6 @@ aiofiles==23.2.1
 
 # Transcription
 deepgram-sdk>=3.2.0,<4.0.0
+
+# PDF generation (patient summary export)
+reportlab==4.1.0

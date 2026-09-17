@@ -7,8 +7,9 @@ import { useTranscriptionPolling } from '../hooks/useTranscriptionPolling'
 import { getVisit, updateVisit, deleteVisit, retryTranscription, VisitResponse } from '../api/visits'
 import { LiveRecorder } from '../components/LiveRecorder/LiveRecorder'
 import { TranscriptSegment } from '../hooks/useLiveTranscription'
-import { generateNote, getNote, syncSection, deleteNote, NoteResponse } from '../api/notes'
+import { generateNote, getNote, syncSection, deleteNote, exportPatientSummaryPdf, NoteResponse } from '../api/notes'
 import { useToast } from '../components/Toast/ToastContext'
+import { patientSummaryToText } from '../utils/patientSummary'
 
 type Step = 0 | 1 | 2 // speak=0, summarize=1, sync=2
 
@@ -274,6 +275,9 @@ export const VisitDetail = () => {
 
   // Patient summary state
   const [patientSummary, setPatientSummary] = useState('')
+  // Tracks whether the provider has edited the box, so polling/reload won't clobber their edits.
+  const patientSummaryEditedRef = useRef(false)
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false)
   const [summaryEmail, setSummaryEmail] = useState('')
   const [showSendConfirm, setShowSendConfirm] = useState(false)
   const [showSendSuccess, setShowSendSuccess] = useState(false)
@@ -327,6 +331,7 @@ export const VisitDetail = () => {
     setCollapsedSections({ subjective: false, objective: false, assessment: false, plan: false })
     setCurrentStep(0)
     setPatientSummary('')
+    patientSummaryEditedRef.current = false
     setSummaryEmail('')
     setVisitDateDraft('')
     setLiveRecordingDone(false)
@@ -362,6 +367,12 @@ export const VisitDetail = () => {
           plan: sectionToText('plan', n.content),
         }
         setNoteTexts(texts)
+        // Populate the Patient Summary box from the AI-generated summary, unless the
+        // provider has already edited it in this session.
+        if (!patientSummaryEditedRef.current) {
+          const summaryText = patientSummaryToText(n.content?.patient_summary)
+          if (summaryText) setPatientSummary(summaryText)
+        }
         setSyncedSections({
           subjective: Boolean(n.synced_sections?.subjective),
           objective: Boolean(n.synced_sections?.objective),
@@ -409,6 +420,9 @@ export const VisitDetail = () => {
                 plan: sectionToText('plan', n.content),
               }
               setNoteTexts(texts)
+              if (!patientSummaryEditedRef.current) {
+                setPatientSummary(patientSummaryToText(n.content?.patient_summary))
+              }
               if (n.status === 'draft' && Object.values(texts).every(t => !t) && !emptyNoteWarnedRef.current) {
                 emptyNoteWarnedRef.current = true
                 console.error('[notePolling] Draft note has all-empty sections — content may have unexpected structure.', n.content)
@@ -431,6 +445,9 @@ export const VisitDetail = () => {
             plan: sectionToText('plan', n.content),
           }
           setNoteTexts(texts)
+          if (!patientSummaryEditedRef.current) {
+            setPatientSummary(patientSummaryToText(n.content?.patient_summary))
+          }
           setSyncedSections({
             subjective: Boolean(n.synced_sections?.subjective),
             objective: Boolean(n.synced_sections?.objective),
@@ -529,6 +546,8 @@ export const VisitDetail = () => {
       await deleteNote(visitId, note.id)
       setNote(null)
       setNoteTexts({ subjective: '', objective: '', assessment: '', plan: '' })
+      setPatientSummary('')
+      patientSummaryEditedRef.current = false
       setSyncedSections({ subjective: false, objective: false, assessment: false, plan: false })
       await generateNote(visitId)
       await loadNote()
@@ -906,7 +925,7 @@ export const VisitDetail = () => {
                 <h3 className="text-lg mb-4">Patient Summary</h3>
                 <textarea
                   value={patientSummary}
-                  onChange={e => setPatientSummary(e.target.value)}
+                  onChange={e => { patientSummaryEditedRef.current = true; setPatientSummary(e.target.value) }}
                   rows={4}
                   className="w-full resize-y text-sm text-gray-700 focus:outline-none bg-transparent mb-4 placeholder:italic placeholder:text-gray-400"
                   placeholder="Patient-friendly summary will appear here"
@@ -923,9 +942,32 @@ export const VisitDetail = () => {
                     className="flex-1 border border-gray-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-[#4ac6d6] italic text-gray-600 placeholder:text-gray-400"
                   />
                   <button
-                    onClick={() => window.print()}
-                    className="p-2 text-gray-500 hover:text-[#4ac6d6] transition-colors"
-                    title="Print"
+                    onClick={async () => {
+                      if (!note || !visitId) return
+                      if (!patientSummary.trim()) {
+                        setSendEmailError('Please generate or enter a summary before printing.')
+                        return
+                      }
+                      setIsGeneratingPdf(true)
+                      try {
+                        const { blob, filename } = await exportPatientSummaryPdf(visitId, note.id, patientSummary)
+                        const url = window.URL.createObjectURL(blob)
+                        const link = document.createElement('a')
+                        link.href = url
+                        link.download = filename
+                        document.body.appendChild(link)
+                        link.click()
+                        link.remove()
+                        window.URL.revokeObjectURL(url)
+                      } catch {
+                        toast.error('Could not generate the PDF. Please try again.')
+                      } finally {
+                        setIsGeneratingPdf(false)
+                      }
+                    }}
+                    disabled={isGeneratingPdf}
+                    className="p-2 text-gray-500 hover:text-[#4ac6d6] transition-colors disabled:opacity-50"
+                    title="Print / Download PDF"
                   >
                     <Printer size={20} />
                   </button>

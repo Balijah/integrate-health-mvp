@@ -44,6 +44,13 @@ export interface SOAPContent {
     follow_up: string
     patient_education: string
   }
+  patient_summary?: {
+    title?: string
+    visit_summary?: string
+    plan_sections?: { heading?: string; items?: string[] }[]
+    watch_for?: string[]
+    follow_up?: string[]
+  }
   metadata: {
     generated_at: string
     model_version: string
@@ -218,4 +225,35 @@ export const exportNote = async (
     { format }
   )
   return response.data
+}
+
+/**
+ * Export the patient-facing summary as a logo-branded PDF and return it as a Blob.
+ *
+ * @param visitId - Visit ID
+ * @param noteId - Note ID
+ * @param patientSummary - The (possibly edited) patient summary text to render
+ * @returns PDF file as a Blob
+ */
+export interface PatientSummaryPdfExport {
+  blob: Blob
+  filename: string
+}
+
+export const exportPatientSummaryPdf = async (
+  visitId: string,
+  noteId: string,
+  patientSummary: string
+): Promise<PatientSummaryPdfExport> => {
+  const response = await apiClient.post(
+    `/visits/${visitId}/notes/${noteId}/export/pdf`,
+    { patient_summary: patientSummary },
+    { responseType: 'blob' }
+  )
+  const disposition = response.headers['content-disposition'] as string | undefined
+  const filenameMatch = disposition?.match(/filename="?([^";]+)"?/i)
+  return {
+    blob: response.data as Blob,
+    filename: filenameMatch?.[1] || 'patient-summary.pdf',
+  }
 }
