@@ -55,17 +55,6 @@ export interface VisitListResponse {
 }
 
 /**
- * Audio upload response.
- */
-export interface AudioUploadResponse {
-  visit_id: string
-  audio_file_path: string
-  audio_duration_seconds: number | null
-  file_size_bytes: number
-  mime_type: string
-}
-
-/**
  * Transcription status response.
  */
 export interface TranscriptionStatusResponse {
@@ -150,56 +139,6 @@ export const deleteVisit = async (id: string): Promise<void> => {
 }
 
 /**
- * Upload audio for a visit.
- *
- * @param visitId - Visit ID
- * @param audioBlob - Audio file blob
- * @param onProgress - Optional progress callback
- * @returns Audio upload response
- */
-export const uploadAudio = async (
-  visitId: string,
-  audioBlob: Blob,
-  onProgress?: (progress: number) => void
-): Promise<AudioUploadResponse> => {
-  const formData = new FormData()
-
-  // Get file extension from MIME type
-  const mimeToExt: Record<string, string> = {
-    'audio/webm': 'webm',
-    'audio/wav': 'wav',
-    'audio/mp3': 'mp3',
-    'audio/mpeg': 'mp3',
-    'audio/mp4': 'm4a',
-    'audio/ogg': 'ogg',
-  }
-  const ext = mimeToExt[audioBlob.type] || 'webm'
-  const filename = `recording.${ext}`
-
-  formData.append('file', audioBlob, filename)
-
-  const response = await apiClient.post<AudioUploadResponse>(
-    `/visits/${visitId}/audio`,
-    formData,
-    {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-      onUploadProgress: (progressEvent) => {
-        if (onProgress && progressEvent.total) {
-          const progress = Math.round(
-            (progressEvent.loaded * 100) / progressEvent.total
-          )
-          onProgress(progress)
-        }
-      },
-    }
-  )
-
-  return response.data
-}
-
-/**
  * Get transcription status for a visit.
  *
  * @param visitId - Visit ID
@@ -210,21 +149,6 @@ export const getTranscriptionStatus = async (
 ): Promise<TranscriptionStatusResponse> => {
   const response = await apiClient.get<TranscriptionStatusResponse>(
     `/visits/${visitId}/transcription/status`
-  )
-  return response.data
-}
-
-/**
- * Trigger transcription for a visit.
- *
- * @param visitId - Visit ID
- * @returns Transcription trigger response
- */
-export const triggerTranscription = async (
-  visitId: string
-): Promise<TranscribeResponse> => {
-  const response = await apiClient.post<TranscribeResponse>(
-    `/visits/${visitId}/transcribe`
   )
   return response.data
 }
