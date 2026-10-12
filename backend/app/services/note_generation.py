@@ -35,13 +35,15 @@ CORE RULES
 
 - Only include information explicitly stated in the transcript or provided context.
 - Never invent, assume, or hallucinate clinical details.
+- Only document diagnoses, interpretations, causal links, differentials, warnings, and recommendations that the clinician explicitly stated.
+- Do not add a rationale, purpose, or indication to an order or recommendation unless the clinician explicitly stated it.
 - Omit any field entirely if information is not present.
 - Do not use empty strings, null values, placeholders, or bracketed instructions.
 - Use the patient's preferred gender pronouns throughout.
 - Use precise medical language, but preserve patient-reported wording when clinically meaningful.
 - Use numerals for all dosages and frequencies, e.g., "10 mg twice daily."
 - For medications and supplements, include name, dose, frequency, adherence pattern, reason for use, and reason for stopping or changing when mentioned.
-- Prioritize completeness and clinical safety over brevity.
+- Preserve every unique clinical fact, but do not repeat the same fact within a section.
 - Do not over-compress the patient story.
 
 --------------------------------------------------
@@ -135,11 +137,15 @@ Clinical Discussion:
   - findings: detailed supporting details from the visit
   - interpretation: clinical meaning, concern, differential, or provider impression when discussed
   - plan_summary: what was recommended or planned for that issue
+- Populate interpretation only when the clinician explicitly states that interpretation. If the clinician names an issue without explaining its meaning or cause, omit interpretation.
+- In plan_summary, preserve the clinician's action without supplying an unstated reason for it.
+- Do not independently label a lab value high, low, abnormal, deficient, or suboptimal, and do not infer a diagnosis or cause from a value.
 - Include all relevant supporting details, even if the note becomes longer.
 - Do not collapse multiple important problems into one vague issue.
 
 Clinical Reasoning:
-- Explicitly connect symptoms, timeline, risk factors, labs, medications, supplements, and treatment decisions.
+- Include connections between symptoms, timeline, risk factors, labs, medications, supplements, and treatment decisions only when the clinician stated them.
+- Omit clinical_reasoning entirely if the clinician did not voice those connections.
 - Include differential considerations when discussed.
 - Preserve uncertainty when present.
 - Do not state certainty where the transcript only supports concern, suspicion, or possibility.
@@ -310,8 +316,8 @@ IMPORTANT: Values shown in [brackets] below are field descriptions only — neve
       "continue": ["[omit array if none]"],
       "discontinue": ["[omit array if none]"]
     }},
-    "lab_orders": ["[test and indication — omit array if none]"],
-    "imaging_or_referrals": ["[imaging or referral and reason — omit array if none]"],
+    "lab_orders": ["[test; include indication only if explicitly stated — omit array if none]"],
+    "imaging_or_referrals": ["[imaging or referral; include reason only if explicitly stated — omit array if none]"],
     "lifestyle_recommendations": "[omit if not mentioned]",
     "patient_education": "[omit if not mentioned]",
     "follow_up": "[omit if not mentioned]"
@@ -529,14 +535,12 @@ def generate_soap_note(transcript: str, additional_context: str = "") -> dict:
             ],
         }
 
-        # Log full request before sending
+        # Log request metadata only; prompts and transcripts can contain PHI.
         logger.info(
             f"[BEDROCK REQUEST] model={settings.bedrock_model_id} "
             f"max_tokens={settings.bedrock_max_tokens} temperature={settings.bedrock_temperature} "
             f"transcript_len={len(transcript)} context_len={len(additional_context_block)}"
         )
-        logger.info(f"[BEDROCK SYSTEM PROMPT]\n{SYSTEM_PROMPT}")
-        logger.info(f"[BEDROCK USER PROMPT]\n{user_prompt}")
 
         _generation_start = time.perf_counter()
         response = bedrock.invoke_model_with_response_stream(
@@ -554,6 +558,7 @@ def generate_soap_note(transcript: str, additional_context: str = "") -> dict:
         text_chunks = []
         input_tokens = 0
         output_tokens = 0
+        stop_reason = None
         _first_token_at = None  # perf_counter timestamp of the first text delta
 
         for event in response["body"]:
@@ -573,6 +578,7 @@ def generate_soap_note(transcript: str, additional_context: str = "") -> dict:
                 input_tokens = event_data.get("message", {}).get("usage", {}).get("input_tokens", 0)
             elif event_type == "message_delta":
                 output_tokens = event_data.get("usage", {}).get("output_tokens", 0)
+                stop_reason = event_data.get("delta", {}).get("stop_reason")
 
         _stream_end = time.perf_counter()
         response_text = "".join(text_chunks)
@@ -615,16 +621,13 @@ def generate_soap_note(transcript: str, additional_context: str = "") -> dict:
             f"streaming_ms={streaming_ms} tok_per_s={output_tokens_per_sec} "
             f"client_init_ms={client_init_ms} invoke_handshake_ms={invoke_handshake_ms} "
             f"input_tokens={input_tokens} output_tokens={output_tokens} "
-            f"transcript_len={len(transcript)}"
+            f"stop_reason={stop_reason} transcript_len={len(transcript)}"
         )
-        logger.info(f"[BEDROCK RAW RESPONSE]\n{response_text}")
-
         # Parse JSON response - handle potential markdown code blocks or extra text
         try:
             soap_content = _extract_json_from_response(response_text)
         except json.JSONDecodeError as e:
             logger.error(f"[BEDROCK] Failed to parse response as JSON (length={len(response_text)}): {e}")
-            logger.error(f"[BEDROCK RAW UNPARSEABLE RESPONSE]\n{response_text}")
             raise NoteGenerationError(f"Failed to parse generated note: {str(e)}")
 
         # Coerce review_of_systems to a string if Bedrock returned a dict
@@ -639,7 +642,6 @@ def generate_soap_note(transcript: str, additional_context: str = "") -> dict:
         soap_keys = {"subjective", "objective", "assessment", "plan"}
         if not soap_keys.intersection(soap_content.keys()):
             logger.error(f"[BEDROCK] Response has no SOAP sections. Keys={list(soap_content.keys())}")
-            logger.error(f"[BEDROCK RAW EMPTY RESPONSE]\n{response_text}")
             raise NoteGenerationError(
                 "The transcript did not contain enough clinical content to generate a note. "
                 "Please record a visit with clinical details and try again."
@@ -660,6 +662,7 @@ def generate_soap_note(transcript: str, additional_context: str = "") -> dict:
                 "ttft_ms": ttft_ms,
                 "streaming_ms": streaming_ms,
                 "output_tokens_per_sec": output_tokens_per_sec,
+                "stop_reason": stop_reason,
                 "client_init_ms": client_init_ms,
                 "invoke_handshake_ms": invoke_handshake_ms,
             },

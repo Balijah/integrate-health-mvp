@@ -9,8 +9,10 @@ import pytest
 import pytest_asyncio
 from botocore.exceptions import ClientError, EventStreamError
 from httpx import AsyncClient
+from sqlalchemy import select
 
 from app.api.notes import _render_patient_summary_pdf
+from app.models.note import Note
 from app.services.note_generation import NoteGenerationError, generate_soap_note
 
 
@@ -42,6 +44,55 @@ class TestNoteEndpoints:
 
         assert response.status_code == 400
         assert "transcript" in response.json()["detail"].lower()
+
+    async def test_generate_note_commits_before_sqs_enqueue(
+        self, client: AsyncClient, auth_headers, test_visit_with_transcript, db_session
+    ):
+        """The worker must be able to read the note as soon as SQS delivers it."""
+        transaction_states = []
+
+        def capture_enqueue(*_args):
+            transaction_states.append(db_session.in_transaction())
+
+        settings = MagicMock(sqs_queue_url="https://example.com/dev-queue")
+        with patch("app.api.notes.get_settings", return_value=settings):
+            with patch("app.api.notes._enqueue_note_generation", side_effect=capture_enqueue):
+                response = await client.post(
+                    f"/api/v1/visits/{test_visit_with_transcript.id}/notes/generate",
+                    headers=auth_headers,
+                    json={},
+                )
+
+        assert response.status_code == 201
+        assert transaction_states == [False]
+        note = await db_session.scalar(
+            select(Note).where(Note.visit_id == test_visit_with_transcript.id)
+        )
+        assert note is not None
+        assert note.status == "generating"
+
+    async def test_generate_note_marks_failed_when_sqs_enqueue_fails(
+        self, client: AsyncClient, auth_headers, test_visit_with_transcript, db_session
+    ):
+        """A publish failure must remain retryable instead of leaving a stuck note."""
+        settings = MagicMock(sqs_queue_url="https://example.com/dev-queue")
+        with patch("app.api.notes.get_settings", return_value=settings):
+            with patch(
+                "app.api.notes._enqueue_note_generation",
+                side_effect=RuntimeError("synthetic SQS failure"),
+            ):
+                with pytest.raises(RuntimeError, match="synthetic SQS failure"):
+                    await client.post(
+                        f"/api/v1/visits/{test_visit_with_transcript.id}/notes/generate",
+                        headers=auth_headers,
+                        json={},
+                    )
+
+        note = await db_session.scalar(
+            select(Note).where(Note.visit_id == test_visit_with_transcript.id)
+        )
+        assert note is not None
+        assert note.status == "failed"
 
     async def test_get_note_visit_not_found(self, client: AsyncClient, auth_headers):
         """Test getting notes for non-existent visit."""
@@ -330,6 +381,7 @@ class TestGenerateSoapNoteStreaming:
         assert "plan" in result
         assert result["metadata"]["usage"]["input_tokens"] == 100
         assert result["metadata"]["usage"]["output_tokens"] == 42
+        assert result["metadata"]["timing"]["stop_reason"] == "end_turn"
         mock_bedrock.invoke_model_with_response_stream.assert_called_once()
         mock_bedrock.invoke_model.assert_not_called()
 

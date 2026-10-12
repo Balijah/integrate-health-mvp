@@ -6,6 +6,7 @@ No real DB or SQS connections — everything is mocked.
 import asyncio
 import json
 import uuid
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.services.note_generation import NoteGenerationError
@@ -81,6 +82,7 @@ class TestWorkerHandleGenerateNote:
         note.visit_id = uuid.uuid4()
         note.status = status
         note.content = {}
+        note.created_at = datetime.now(timezone.utc) - timedelta(seconds=2)
         return note
 
     def _make_visit(self, transcript="Doctor: Hi. Patient: I feel tired."):
@@ -148,6 +150,25 @@ class TestWorkerHandleGenerateNote:
                     asyncio.run(_handle_generate_note({"note_id": str(note.id)}))
 
         assert note.status == "failed"
+
+    def test_records_queue_and_end_to_end_timing(self):
+        """Successful jobs preserve model timing and add worker timing."""
+        from app.worker import _handle_generate_note
+
+        note = self._make_note()
+        visit = self._make_visit()
+        mock_factory, _ = self._build_session_factory(note, visit)
+        generated = {"metadata": {"timing": {"total_seconds": 1.0}}}
+
+        with patch("app.worker.create_async_engine", return_value=AsyncMock()):
+            with patch("app.worker.async_sessionmaker", return_value=mock_factory):
+                with patch("app.worker.generate_soap_note", return_value=generated):
+                    asyncio.run(_handle_generate_note({"note_id": str(note.id)}))
+
+        timing = note.content["metadata"]["timing"]
+        assert timing["total_seconds"] == 1.0
+        assert timing["queue_wait_ms"] >= 1900
+        assert timing["end_to_end_seconds"] >= 1.9
 
 
 # ---------------------------------------------------------------------------

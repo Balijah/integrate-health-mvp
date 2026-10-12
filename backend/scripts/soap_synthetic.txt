@@ -1,0 +1,7 @@
+SYNTHETIC TEST VISIT. No real patient information.
+Clinician: What brings you in today?
+Patient: I have felt tired for three weeks. It started after my work schedule changed. I sleep about six hours a night. I have no fever, chest pain, or shortness of breath.
+Clinician: Any medications or supplements?
+Patient: I take vitamin D 1000 IU daily. No prescription medications. I have no known drug allergies.
+Clinician: Your blood pressure today is 118/76 and heart rate is 72. Your heart rhythm is regular and your lungs are clear. We do not have lab results yet. The cause of the fatigue is uncertain; insufficient sleep may contribute. We will check a CBC and TSH. Continue your current vitamin D without changing the dose. Try a consistent bedtime and allow seven to eight hours for sleep. We will follow up in two weeks to review the results and symptoms. Seek urgent care for new chest pain or shortness of breath.
+Patient: I understand. I will get the blood tests this week.
