@@ -14,6 +14,7 @@ import signal
 import threading
 import time
 import uuid
+from datetime import datetime, timezone
 
 import boto3
 from sqlalchemy import select
@@ -104,14 +105,28 @@ async def _handle_generate_note(body: dict) -> None:
 
             transcript = visit.transcript
 
+            created_at = note.created_at
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            queue_wait_ms = max(
+                0.0,
+                round((datetime.now(timezone.utc) - created_at).total_seconds() * 1000, 1),
+            )
+
         logger.info(
-            f"[WORKER] Generating note {note_uuid} transcript_len={len(transcript)}"
+            f"[WORKER] Generating note {note_uuid} transcript_len={len(transcript)} "
+            f"queue_wait_ms={queue_wait_ms}"
         )
 
         try:
             content = await asyncio.wait_for(
                 asyncio.to_thread(generate_soap_note, transcript, additional_context),
                 timeout=600.0,  # 10 minutes max; matches SQS visibility timeout
+            )
+            timing = content.setdefault("metadata", {}).setdefault("timing", {})
+            timing["queue_wait_ms"] = queue_wait_ms
+            timing["end_to_end_seconds"] = round(
+                (datetime.now(timezone.utc) - created_at).total_seconds(), 2
             )
             new_status = "draft"
         except (NoteGenerationError, asyncio.TimeoutError) as e:

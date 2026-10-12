@@ -176,7 +176,13 @@ async def generate_note(
             existing.status = "generating"
             await db.flush()
             if settings.sqs_queue_url:
-                _enqueue_note_generation(str(existing.id), request.additional_context or "")
+                await db.commit()
+                try:
+                    _enqueue_note_generation(str(existing.id), request.additional_context or "")
+                except Exception:
+                    existing.status = "failed"
+                    await db.commit()
+                    raise
             else:
                 background_tasks.add_task(
                     _run_note_generation,
@@ -215,7 +221,13 @@ async def generate_note(
     await db.refresh(note)
 
     if settings.sqs_queue_url:
-        _enqueue_note_generation(str(note.id), request.additional_context or "")
+        await db.commit()
+        try:
+            _enqueue_note_generation(str(note.id), request.additional_context or "")
+        except Exception:
+            note.status = "failed"
+            await db.commit()
+            raise
     else:
         background_tasks.add_task(
             _run_note_generation,

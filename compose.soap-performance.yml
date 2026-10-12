@@ -1,0 +1,66 @@
+name: integrate-health-soap-performance
+
+# Standalone offline environment. Do not combine with docker-compose.yml.
+services:
+  db:
+    image: postgres:15-alpine
+    ports:
+      - 127.0.0.1:55432:5432
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: local-performance-only
+      POSTGRES_DB: soap_performance
+    volumes:
+      - database:/var/lib/postgresql/data
+    networks:
+      - default
+      - host-test
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U postgres -d soap_performance]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    build: ./backend
+    environment:
+      ENVIRONMENT: development
+      DATABASE_URL: postgresql+asyncpg://postgres:local-performance-only@db:5432/soap_performance
+      TEST_DATABASE_URL: postgresql+asyncpg://postgres:local-performance-only@db:5432/soap_performance_test
+      FRONTEND_URL: http://localhost:3001
+      BACKEND_URL: http://localhost:3001
+      STORAGE_MODE: local
+      UPLOAD_DIR: /tmp/soap-uploads
+      SQS_QUEUE_URL: ""
+      S3_BUCKET_NAME: ""
+      DEEPGRAM_API_KEY: ""
+      ANTHROPIC_API_KEY: ""
+      AWS_ACCESS_KEY_ID: offline
+      AWS_SECRET_ACCESS_KEY: offline
+      AWS_EC2_METADATA_DISABLED: "true"
+    volumes:
+      - ./backend:/app:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    environment:
+      VITE_API_URL: http://localhost:3001
+    ports:
+      - 127.0.0.1:3001:3000
+    depends_on:
+      - backend
+    networks:
+      - default
+      - browser
+
+volumes:
+  database:
+
+networks:
+  default:
+    internal: true
+  browser:
+  host-test:
