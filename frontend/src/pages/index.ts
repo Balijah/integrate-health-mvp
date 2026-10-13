@@ -1,8 +1,0 @@
-export * from './Dashboard'
-export * from './Login'
-export * from './Register'
-export * from './VisitDetail'
-export * from './PatientsList'
-export * from './Settings'
-export { ForgotPassword } from './ForgotPassword'
-export { ResetPassword } from './ResetPassword'

@@ -99,31 +99,6 @@ export interface GenerateNoteResponse {
 }
 
 /**
- * Note update request.
- */
-export interface NoteUpdateRequest {
-  content?: SOAPContent
-  status?: 'draft' | 'reviewed' | 'finalized' | 'generating' | 'failed'
-}
-
-/**
- * Note export request.
- */
-export interface NoteExportRequest {
-  format: 'markdown' | 'text' | 'json'
-}
-
-/**
- * Note export response.
- */
-export interface NoteExportResponse {
-  visit_id: string
-  note_id: string
-  format: string
-  content: string
-}
-
-/**
  * Generate a SOAP note for a visit.
  *
  * @param visitId - Visit ID
@@ -150,26 +125,6 @@ export const generateNote = async (
 export const getNote = async (visitId: string): Promise<NoteResponse | null> => {
   const response = await apiClient.get<NoteResponse | null>(
     `/visits/${visitId}/notes`
-  )
-  return response.data
-}
-
-/**
- * Update a note.
- *
- * @param visitId - Visit ID
- * @param noteId - Note ID
- * @param data - Update data
- * @returns Updated note
- */
-export const updateNote = async (
-  visitId: string,
-  noteId: string,
-  data: NoteUpdateRequest
-): Promise<NoteResponse> => {
-  const response = await apiClient.put<NoteResponse>(
-    `/visits/${visitId}/notes/${noteId}`,
-    data
   )
   return response.data
 }
@@ -203,26 +158,6 @@ export const syncSection = async (
   const response = await apiClient.post<SyncSectionResponse>(
     `/visits/${visitId}/notes/${noteId}/sync-section`,
     { section }
-  )
-  return response.data
-}
-
-/**
- * Export a note in the specified format.
- *
- * @param visitId - Visit ID
- * @param noteId - Note ID
- * @param format - Export format
- * @returns Export response with content
- */
-export const exportNote = async (
-  visitId: string,
-  noteId: string,
-  format: 'markdown' | 'text' | 'json' = 'markdown'
-): Promise<NoteExportResponse> => {
-  const response = await apiClient.post<NoteExportResponse>(
-    `/visits/${visitId}/notes/${noteId}/export`,
-    { format }
   )
   return response.data
 }
