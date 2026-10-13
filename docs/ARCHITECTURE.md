@@ -1,551 +1,80 @@
-# Architecture - Integrate Health MVP
+# Integrate Health Architecture
 
-## System Architecture
+This document describes the current application on `main`. For exact routes, use the generated OpenAPI document at `/docs`; for configuration defaults, use `backend/app/config.py`.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        FRONTEND                                  │
-│                   React + TypeScript                             │
-│  ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌───────────┐    │
-│  │   Auth    │  │  Record   │  │  Notes    │  │  History  │    │
-│  │  Pages    │  │   View    │  │  Editor   │  │   View    │    │
-│  └───────────┘  └───────────┘  └───────────┘  └───────────┘    │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                        BACKEND                                   │
-│                   FastAPI + Python                               │
-│  ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌───────────┐    │
-│  │   Auth    │  │  Visits   │  │ Transcribe│  │   Notes   │    │
-│  │  Service  │  │  Service  │  │  Service  │  │  Service  │    │
-│  └───────────┘  └───────────┘  └───────────┘  └───────────┘    │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-              ┌───────────────┼───────────────┐
-              ▼               ▼               ▼
-       ┌───────────┐   ┌───────────┐   ┌───────────┐
-       │ PostgreSQL│   │ Deepgram  │   │  Claude   │
-       │  Database │   │    API    │   │    API    │
-       └───────────┘   └───────────┘   └───────────┘
+## System overview
+
+```text
+Browser
+  React + TypeScript
+       |
+       | HTTPS / WebSocket
+       v
+FastAPI API -------------------- AWS SES
+  |     |     |                     email
+  |     |     +----------------- AWS Bedrock
+  |     |                           SOAP note + patient summary
+  |     +----------------------- Deepgram
+  |                                 live/prerecorded transcription
+  +----------- PostgreSQL
+  |
+  +----------- local files or Amazon S3
+  |
+  +----------- Amazon SQS -> note-generation worker (production)
 ```
 
----
+## Main visit flow
 
-## Data Flow
+1. An authenticated provider creates or opens a visit.
+2. `VisitDetail` starts the live recorder and requests a transcription session.
+3. Browser audio is streamed over the application WebSocket to Deepgram.
+4. Transcript segments are returned to the browser and persisted to the visit when the session ends. Prerecorded transcription endpoints also use Deepgram.
+5. The provider requests a SOAP note. The API creates the note-generation job.
+6. When `SQS_QUEUE_URL` is configured, the worker processes the job; otherwise the API uses its local background-task fallback.
+7. The note-generation service streams a Claude response from AWS Bedrock, validates and normalizes the JSON, and stores the SOAP sections and patient summary.
+8. The provider reviews and edits individual sections. The patient summary can be exported as PDF or sent through SES.
 
-### Complete Visit Flow
+## Frontend
 
-```
-┌─────────────┐
-│  Provider   │
-│   opens     │
-│  new visit  │
-└──────┬──────┘
-       │
-       ▼
-┌─────────────────────────┐
-│ 1. Create Visit Record  │
-│    - Patient ref        │
-│    - Visit date         │
-│    - Chief complaint    │
-└──────┬──────────────────┘
-       │
-       ▼
-┌─────────────────────────┐
-│ 2. Record Audio         │
-│    - Browser captures   │
-│    - Show timer         │
-│    - Stop recording     │
-└──────┬──────────────────┘
-       │
-       ▼
-┌─────────────────────────┐
-│ 3. Upload Audio         │
-│    - POST audio blob    │
-│    - Store file         │
-│    - Update visit       │
-└──────┬──────────────────┘
-       │
-       ▼
-┌─────────────────────────┐
-│ 4. Transcribe (Async)   │
-│    - Send to Deepgram   │
-│    - Poll for status    │
-│    - Store transcript   │
-└──────┬──────────────────┘
-       │
-       ▼
-┌─────────────────────────┐
-│ 5. Generate Note        │
-│    - Send to Claude     │
-│    - Parse SOAP JSON    │
-│    - Store structured   │
-└──────┬──────────────────┘
-       │
-       ▼
-┌─────────────────────────┐
-│ 6. Edit & Export        │
-│    - Provider reviews   │
-│    - Makes edits        │
-│    - Exports note       │
-└─────────────────────────┘
-```
+The frontend is a Vite React application. Current routed screens cover authentication, password reset, dashboard/patient navigation, settings, and visit details.
 
----
+The primary clinical workflow lives in `frontend/src/pages/VisitDetail.tsx`. Recording UI is under `frontend/src/components/LiveRecorder/`; reusable API clients are under `frontend/src/api/`. Zustand is currently used for authentication state.
 
-## Component Breakdown
+There is no separate `NewVisit`, legacy `AudioRecorder`, or `NoteEditor` flow. Those unused implementations were removed in PR #42.
 
-### Frontend Components
+## Backend
 
-#### Authentication Flow
-```
-Login Page
-    │
-    ├─> POST /auth/login
-    │   └─> Receive JWT token
-    │
-    ├─> Store token (httpOnly cookie or localStorage)
-    │
-    └─> Redirect to Dashboard
-```
+`backend/app/main.py` registers authentication, visits, transcription, notes, support, password reset, profile, and WebSocket routes.
 
-#### Recording Flow
-```
-NewVisit Page
-    │
-    ├─> AudioRecorder Component
-    │   ├─> MediaRecorder API
-    │   ├─> Timer display
-    │   └─> Blob output
-    │
-    ├─> POST /visits/{id}/audio
-    │   └─> Upload audio file
-    │
-    └─> Navigate to Visit Detail
-```
+The main service boundaries are:
 
-#### Note Viewing Flow
-```
-VisitDetail Page
-    │
-    ├─> Poll GET /visits/{id}/transcription/status
-    │   └─> Show progress
-    │
-    ├─> When complete: POST /visits/{id}/notes/generate
-    │
-    ├─> GET /visits/{id}/notes
-    │   └─> Display in NoteEditor
-    │
-    └─> Allow edits and export
-```
+- `services/auth.py` — password and token operations
+- `services/transcription.py` — prerecorded Deepgram transcription
+- `services/live_transcription.py` — in-memory live Deepgram connections
+- `services/note_generation.py` — Bedrock prompt, streaming response handling, validation, and formatting
+- `services/s3_storage.py` — S3 upload, download, presigning, and deletion
+- `worker.py` — SQS job polling and note generation
 
----
+PostgreSQL access uses async SQLAlchemy. Alembic migrations are the source of truth for schema evolution.
 
-### Backend Services
+## Data and trust boundaries
 
-#### Auth Service
-**Responsibilities:**
-- User registration
-- Password hashing (bcrypt, 12 rounds)
-- JWT token generation
-- Token validation
+- Audio, transcripts, notes, and patient summaries may contain PHI.
+- Browser input, uploaded files, WebSocket frames, model output, and external-service responses are untrusted inputs.
+- Authenticated data access must remain scoped to the owning user.
+- Model output must be parsed and validated before persistence.
+- Logs must not include PHI or secrets.
+- Local storage is intended for development. Production storage uses S3 and the surrounding AWS security controls.
 
-**Key Functions:**
-```python
-async def register_user(email, password, full_name) -> User
-async def authenticate_user(email, password) -> User
-def create_access_token(user_id: str) -> str
-async def get_current_user(token: str) -> User
-```
+## Local versus production execution
 
----
+Docker Compose starts PostgreSQL, FastAPI, and the Vite frontend for local development. Deepgram requires an API key. Bedrock calls require AWS credentials available to the backend process; the default Compose file does not mount a host AWS profile.
 
-#### Visit Service
-**Responsibilities:**
-- Visit CRUD operations
-- Audio file management
-- Status tracking
+Production deployment uses the repository's AWS infrastructure and deployment scripts. The API and SQS worker run as separate systemd services. The frontend is served by nginx and distributed through CloudFront. RDS stores application data, S3 stores audio and deployment artifacts, and SES sends application email.
 
-**Key Functions:**
-```python
-async def create_visit(user_id, patient_ref, visit_date) -> Visit
-async def list_visits(user_id, filters) -> List[Visit]
-async def get_visit(visit_id) -> Visit
-async def save_audio_file(visit_id, audio_bytes) -> str
-async def delete_visit(visit_id) -> None
-```
+## Known architectural constraints
 
----
-
-#### Transcription Service
-**Responsibilities:**
-- Deepgram API integration
-- Async transcription processing
-- Status updates
-
-**Key Functions:**
-```python
-async def transcribe_audio(audio_bytes, mime_type) -> dict
-async def start_transcription(visit_id) -> None
-async def get_transcription_status(visit_id) -> str
-async def store_transcript(visit_id, transcript) -> None
-```
-
-**Deepgram Configuration:**
-- Model: `nova-2-medical` (medical terminology optimized)
-- Diarization: Enabled (speaker separation)
-- Smart formatting: Enabled (punctuation, capitalization)
-- Utterances: Enabled (sentence boundaries)
-
----
-
-#### Note Generation Service
-**Responsibilities:**
-- Claude API integration
-- SOAP note structure generation
-- JSON parsing and validation
-
-**Key Functions:**
-```python
-async def generate_soap_note(transcript, context) -> dict
-async def create_note_from_visit(visit_id, context) -> Note
-async def update_note(note_id, content) -> Note
-async def export_note(note_id, format) -> str
-```
-
-**Claude Configuration:**
-- Model: `claude-sonnet-4-20250514`
-- Max tokens: 4096
-- Temperature: 0.3 (for consistency)
-- System prompt: Functional medicine specialist
-
----
-
-## Database Architecture
-
-### Entity Relationships
-
-```
-        ┌─────────────┐
-        │    users    │
-        │ (providers) │
-        └──────┬──────┘
-               │ 1
-               │
-               │ *
-        ┌──────┴──────┐
-        │   visits    │
-        │  (patient   │
-        │   visits)   │
-        └──────┬──────┘
-               │ 1
-               │
-               │ 1
-        ┌──────┴──────┐
-        │    notes    │
-        │    (SOAP)   │
-        └─────────────┘
-```
-
-### Key Design Decisions
-
-1. **UUIDs for Primary Keys**
-   - Better for distributed systems
-   - No sequential enumeration
-   - URL-safe identifiers
-
-2. **JSONB for SOAP Notes**
-   - Flexible structure
-   - Queryable with PostgreSQL JSONB operators
-   - Easy to evolve schema
-
-3. **Soft Deletes (Future)**
-   - Not in MVP
-   - Add `deleted_at` timestamp
-   - Preserve audit trail
-
-4. **No Patient Table**
-   - MVP uses `patient_ref` string
-   - Non-PHI identifier
-   - Future: full patient management
-
----
-
-## API Architecture
-
-### RESTful Design
-
-**Resource Hierarchy:**
-```
-/api/v1
-  /auth
-    POST /register
-    POST /login
-    GET  /me
-  
-  /visits
-    POST   /                    Create visit
-    GET    /                    List visits
-    GET    /{id}                Get visit
-    DELETE /{id}                Delete visit
-    
-    POST   /{id}/audio          Upload audio
-    GET    /{id}/transcription/status
-    
-    POST   /{id}/notes/generate
-    GET    /{id}/notes
-    PUT    /{id}/notes/{note_id}
-    POST   /{id}/notes/{note_id}/export
-```
-
-### Authentication Flow
-
-```
-Client                   Backend
-  │                         │
-  │  POST /auth/login       │
-  ├────────────────────────>│
-  │                         │
-  │    Validate credentials │
-  │    Generate JWT         │
-  │                         │
-  │  <JWT Token>            │
-  │<────────────────────────┤
-  │                         │
-  │  GET /visits            │
-  │  Authorization: Bearer  │
-  ├────────────────────────>│
-  │                         │
-  │    Validate JWT         │
-  │    Get user from token  │
-  │    Query user's visits  │
-  │                         │
-  │  <Visit List>           │
-  │<────────────────────────┤
-```
-
-### Async Processing
-
-**Background Tasks Pattern:**
-```
-Client                   API                  Worker
-  │                       │                      │
-  │  POST /audio          │                      │
-  ├──────────────────────>│                      │
-  │                       │                      │
-  │  <202 Accepted>       │                      │
-  │<────────────────────  │                      │
-  │                       │   Trigger task       │
-  │                       ├─────────────────────>│
-  │                       │                      │
-  │                       │              Process │
-  │                       │              Update  │
-  │                       │              Status  │
-  │                       │                      │
-  │  GET /status          │                      │
-  ├──────────────────────>│                      │
-  │                       │   Check DB           │
-  │  <Status: complete>   │                      │
-  │<────────────────────  │                      │
-```
-
-Note: MVP uses inline processing, not true background workers.
-Future: Add Celery or FastAPI BackgroundTasks.
-
----
-
-## Security Architecture
-
-### Authentication & Authorization
-
-```
-┌──────────────────────────────────────────────────┐
-│              JWT Token Structure                  │
-├──────────────────────────────────────────────────┤
-│ Header:                                          │
-│   {                                              │
-│     "alg": "HS256",                              │
-│     "typ": "JWT"                                 │
-│   }                                              │
-│                                                  │
-│ Payload:                                         │
-│   {                                              │
-│     "sub": "user_id (UUID)",                     │
-│     "exp": "expiration_timestamp",               │
-│     "iat": "issued_at_timestamp"                 │
-│   }                                              │
-│                                                  │
-│ Signature: HMACSHA256(header + payload + secret) │
-└──────────────────────────────────────────────────┘
-```
-
-### Data Protection Layers
-
-```
-┌─────────────────────────────────────────┐
-│         Application Layer               │
-│  - Input validation                     │
-│  - Authentication checks                │
-│  - Authorization rules                  │
-└────────────┬────────────────────────────┘
-             │
-┌────────────┴────────────────────────────┐
-│         Transport Layer                 │
-│  - HTTPS (TLS 1.3)                      │
-│  - Certificate pinning (production)     │
-└────────────┬────────────────────────────┘
-             │
-┌────────────┴────────────────────────────┐
-│         Storage Layer                   │
-│  - Database encryption at rest          │
-│  - Encrypted audio files                │
-│  - Secure key management                │
-└─────────────────────────────────────────┘
-```
-
----
-
-## Scalability Considerations
-
-### Current MVP Limits
-- Single server deployment
-- Inline processing (no queue)
-- Local file storage
-- Single database instance
-
-### Future Scaling Path
-
-**Phase 1: Horizontal Backend**
-```
-Load Balancer
-    │
-    ├─> Backend Instance 1
-    ├─> Backend Instance 2
-    └─> Backend Instance 3
-         │
-         └─> Shared PostgreSQL
-             Shared S3 Storage
-```
-
-**Phase 2: Async Processing**
-```
-API Servers ──> Redis Queue ──> Celery Workers
-                                     │
-                                     ├─> Transcription Workers
-                                     └─> Note Generation Workers
-```
-
-**Phase 3: Multi-Tenant**
-```
-Tenant A ──> Database A
-Tenant B ──> Database B
-Tenant C ──> Database C
-
-Shared: S3, Monitoring, Auth Service
-```
-
----
-
-## Technology Choices Rationale
-
-### Why FastAPI?
-- Native async support (critical for external API calls)
-- Automatic API documentation (OpenAPI/Swagger)
-- Pydantic validation (type safety)
-- High performance
-- Great developer experience
-
-### Why React + Vite?
-- Fast development server (HMR)
-- Modern build tooling
-- Mature ecosystem
-- TypeScript support
-- Large talent pool
-
-### Why PostgreSQL?
-- JSONB support (flexible SOAP structure)
-- ACID compliance (data integrity)
-- Mature, battle-tested
-- Strong ecosystem
-- Good performance for MVP scale
-
-### Why Deepgram?
-- Medical model available (specialized vocabulary)
-- Fast turnaround
-- Diarization (speaker separation)
-- Competitive pricing
-- Good API design
-
-### Why Claude (Anthropic)?
-- Strong medical reasoning
-- Long context window (full transcripts)
-- JSON mode (structured output)
-- Safety-focused (important for healthcare)
-- Constitutional AI approach
-
----
-
-## Deployment Architecture (Local Dev)
-
-```
-Docker Host
-  │
-  ├─> Container: PostgreSQL
-  │     Port: 5432
-  │     Volume: postgres_data
-  │
-  ├─> Container: Backend (FastAPI)
-  │     Port: 8000
-  │     Volumes: ./backend, ./uploads
-  │     Depends: PostgreSQL
-  │
-  └─> Container: Frontend (React)
-        Port: 3000
-        Volume: ./frontend
-        Depends: Backend
-```
-
-**Network:**
-- Default bridge network
-- Services communicate via service names
-- Frontend → Backend via localhost:8000 (dev) or internal network
-
-**Volumes:**
-- `postgres_data`: Database persistence
-- `./backend`: Live code reload
-- `./frontend`: Live code reload
-- `./uploads`: Audio file storage
-
----
-
-## Monitoring & Observability (Future)
-
-### Key Metrics to Track
-- API response times
-- Transcription success rate
-- Note generation success rate
-- Error rates by endpoint
-- Token usage (Claude API)
-- Active users
-- Visits per day
-
-### Logging Strategy
-- Structured JSON logs
-- No PHI in logs
-- Log levels: DEBUG, INFO, WARNING, ERROR
-- Centralized log aggregation (future)
-
-### Health Checks
-```
-GET /health
-{
-  "status": "healthy",
-  "database": "connected",
-  "version": "1.0.0"
-}
-```
-
----
-
-This architecture supports the MVP requirements while providing clear paths for future scaling and enhancement.
+- Live Deepgram connection state is held in API process memory, so horizontal API scaling needs session affinity or an external session/stream coordinator.
+- The local background-task path is a development fallback; durable production processing depends on SQS and the worker.
+- `whisper-service/` and related configuration remain only as deprecated migration artifacts.
+- HIPAA compliance cannot be established from this architecture document alone.
