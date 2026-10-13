@@ -1,156 +1,130 @@
 # Integrate Health MVP
 
-HIPAA-compliant AI assistant for functional medicine providers. Automates clinical documentation by capturing visit audio, transcribing it, and generating structured SOAP notes.
+Clinical documentation software for functional medicine providers. The application records and transcribes visits, generates draft SOAP notes and patient summaries, and lets providers review and export the result.
 
-## Quick Start
+> This repository is designed for workflows that may contain protected health information (PHI). Running this software does not by itself establish HIPAA compliance; compliance also depends on deployment, access controls, agreements, policies, and operational practices.
+
+## What is included
+
+- React 18 + TypeScript provider portal
+- FastAPI API with JWT authentication and PostgreSQL persistence
+- Live and prerecorded transcription through Deepgram
+- Streaming SOAP note generation through Claude on AWS Bedrock
+- Editable SOAP sections and patient summaries, including PDF export and email delivery
+- Local or S3 audio storage
+- Optional SQS-backed note-generation worker in production
+- AWS deployment scripts and infrastructure definitions
+
+## Local quick start
 
 ### Prerequisites
-- Docker and Docker Compose
-- Node.js 20+ (for local frontend development)
-- Python 3.11+ (for local backend development)
 
-### Setup
+- Docker with Compose
+- Node.js 20+ for frontend work outside Docker
+- Python 3.11+ for backend work outside Docker
 
-1. **Clone and configure environment**
-   ```bash
-   cd integrate-health-mvp
-   cp .env.example .env
-   ```
+### Start the application
 
-2. **Start all services**
-   ```bash
-   docker compose up -d
-   ```
-
-3. **Run database migration**
-   ```bash
-   docker compose exec backend alembic upgrade head
-   ```
-
-4. **Verify setup**
-   ```bash
-   # Health check
-   curl http://localhost:8000/health
-   # Should return: {"status": "healthy"}
-
-   # Database tables
-   docker compose exec db psql -U postgres -d integrate_health -c "\dt"
-   # Should show: users, visits, notes, alembic_version
-
-   # Frontend
-   open http://localhost:3000
-   ```
-
-## Services
-
-| Service | URL | Description |
-|---------|-----|-------------|
-| Frontend | http://localhost:3000 | React application |
-| Backend | http://localhost:8000 | FastAPI application |
-| API Docs | http://localhost:8000/docs | Swagger documentation |
-| Database | localhost:5432 | PostgreSQL 15 |
-
-## Project Structure
-
-```
-integrate-health-mvp/
-├── backend/               # FastAPI + SQLAlchemy
-│   ├── app/
-│   │   ├── models/       # Database models
-│   │   ├── schemas/      # Pydantic schemas
-│   │   ├── api/          # API routes
-│   │   ├── services/     # Business logic
-│   │   └── utils/        # Helpers
-│   ├── alembic/          # Database migrations
-│   └── tests/            # Backend tests
-├── frontend/             # React + TypeScript + Vite
-│   └── src/
-│       ├── api/          # API client
-│       ├── components/   # React components
-│       ├── pages/        # Page components
-│       ├── store/        # Zustand stores
-│       ├── hooks/        # Custom hooks
-│       └── types/        # TypeScript types
-├── docs/                 # Documentation
-└── uploads/              # Audio file storage
-```
-
-## Development
-
-### Backend commands
 ```bash
-# Run migrations
-docker compose exec backend alembic upgrade head
-
-# Create new migration
-docker compose exec backend alembic revision --autogenerate -m "description"
-
-# Run tests
-docker compose exec backend pytest
-
-# Check logs
-docker compose logs backend -f
-```
-
-### Frontend commands
-```bash
-# Check logs
-docker compose logs frontend -f
-
-# Run tests
-docker compose exec frontend npm test
-```
-
-### Troubleshooting
-
-**Services won't start:**
-```bash
-docker compose down -v
-docker compose up --build
-```
-
-**Database issues:**
-```bash
-docker compose down -v
-docker compose up db -d
+cp .env.example .env
+docker compose up -d --build
 docker compose exec backend alembic upgrade head
 ```
 
-**Port already in use:**
+Verify the database-backed health check:
+
 ```bash
-# Find and kill process on port 8000
-lsof -ti:8000 | xargs kill -9
+curl http://localhost:8000/health
+# {"status":"healthy","db":"ok"}
 ```
 
-## Tech Stack
+Local URLs:
 
-- **Backend:** FastAPI, SQLAlchemy 2.0, PostgreSQL 15, Alembic
-- **Frontend:** React 18, TypeScript, Vite, Tailwind CSS, Zustand
-- **External:** Deepgram (transcription), Claude (note generation)
+| Service | URL |
+| --- | --- |
+| Frontend | http://localhost:3000 |
+| Backend | http://localhost:8000 |
+| OpenAPI docs | http://localhost:8000/docs |
+| PostgreSQL | localhost:5432 |
 
-## Implementation Phases
+Deepgram operations require `DEEPGRAM_API_KEY`. SOAP generation uses the AWS SDK credential chain and requires access to the configured Bedrock model. The default Compose setup does not inject a host AWS profile into the backend container; use an explicitly configured development credential mechanism or run the backend in an authenticated local environment. Never commit credentials.
 
-1. **Phase 1: Project Foundation** - ✅ Complete
-2. **Phase 2: Authentication** - ✅ Complete
-3. **Phase 3: Visit Management** - ✅ Complete
-4. **Phase 4: Audio Recording & Upload** - ✅ Complete
-5. **Phase 5: Transcription** - ✅ Complete
-6. **Phase 6: SOAP Note Generation** - ✅ Complete
-7. **Phase 7: Polish & Testing** - ✅ Complete
+## Verification
 
-**Bonus Features:**
-- **Live Transcription** - Real-time audio streaming with Deepgram WebSocket API
+These commands mirror the important CI checks:
 
-See [docs/PHASES.md](docs/PHASES.md) for detailed implementation plan.
+```bash
+# Backend
+cd backend
+ruff check app/
+pytest tests/ -q
+
+# Frontend
+cd ../frontend
+npm ci
+npx tsc --noEmit
+npm test -- --run
+npm run build
+```
+
+CI also runs Gitleaks secret scanning. Backend CI applies migrations against PostgreSQL before running tests and enforces the current coverage floor.
+
+## Project layout
+
+```text
+backend/
+  app/
+    api/          FastAPI routes
+    models/       SQLAlchemy models
+    schemas/      Pydantic request/response models
+    services/     transcription, note generation, storage, and auth
+    worker.py     optional SQS note-generation worker
+  alembic/        database migrations
+  tests/          backend regression tests
+frontend/
+  src/
+    api/          typed API clients
+    components/   shared UI and live recorder
+    pages/        routed provider screens
+    store/        authentication state
+    hooks/        live and polling hooks
+    utils/        frontend helpers and tests
+deployment/       systemd and nginx configuration
+docs/             current architecture, schema, and historical phase plan
+terraform/        AWS infrastructure
+whisper-service/  deprecated self-hosted transcription service
+```
+
+## Configuration
+
+Copy `.env.example` to `.env` for local development. Important settings include:
+
+- `DATABASE_URL`
+- `JWT_SECRET_KEY` and `JWT_REFRESH_SECRET_KEY`
+- `DEEPGRAM_API_KEY`, `DEEPGRAM_MODEL`, and `TRANSCRIPTION_PROVIDER`
+- `AWS_REGION`, `BEDROCK_MODEL_ID`, and Bedrock generation settings
+- `STORAGE_MODE`, `S3_BUCKET_NAME`, and `S3_AUDIO_PREFIX`
+- `SQS_QUEUE_URL` for the production worker
+- `SES_FROM_EMAIL`, `FRONTEND_URL`, and `BACKEND_URL`
+
+Application defaults are defined in `backend/app/config.py`; `.env.example` documents the supported environment overrides.
+
+## Deployment
+
+`deploy.sh` packages the backend, applies Alembic migrations, restarts the API and worker services, verifies health, deploys the frontend through nginx, and invalidates CloudFront. It targets the existing Integrate Health AWS environment and is not a generic first-time provisioning script.
+
+Infrastructure definitions live in `terraform/`. Review the plan and environment-specific values before applying or deploying. Production changes should go through CI and the repository's deployment workflow rather than an unreviewed local command.
 
 ## Documentation
 
-- [CLAUDE.md](CLAUDE.md) - Project overview and conventions
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - System architecture
-- [docs/DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md) - Database schema
-- [docs/API_SPEC.md](docs/API_SPEC.md) - API specification
-- [docs/PHASES.md](docs/PHASES.md) - Implementation phases
+- [CLAUDE.md](CLAUDE.md) — repository instructions for Claude Code and other coding agents
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — current system and data flow
+- [docs/DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md) — database schema reference
+- [docs/PHASES.md](docs/PHASES.md) — historical MVP implementation plan
+- [whisper-service/README.md](whisper-service/README.md) — deprecated Whisper service reference
+
+The generated OpenAPI document at `/docs` is the source of truth for current API routes.
 
 ## License
 
-Proprietary - All rights reserved
+Proprietary — all rights reserved.
