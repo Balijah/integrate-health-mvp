@@ -513,9 +513,369 @@ def _extract_json_from_response(response_text: str) -> dict:
     raise json.JSONDecodeError("Could not extract valid JSON from response", response_text, 0)
 
 
+def _invoke_bedrock_streaming(
+    bedrock,
+    model_id: str,
+    system_blocks: list[dict],
+    user_blocks: list[dict],
+    *,
+    max_tokens: int,
+    temperature: float,
+) -> dict:
+    """Fire a single Bedrock streaming request and return parsed results.
+
+    Returns a dict with keys: soap_content, input_tokens, output_tokens,
+    cache_creation_input_tokens, cache_read_input_tokens, duration_seconds,
+    ttft_ms, streaming_ms, output_tokens_per_sec, stop_reason, client_init_ms,
+    invoke_handshake_ms.
+
+    Raises NoteGenerationError on empty responses or parse failures.
+    """
+    request_body = {
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "system": system_blocks,
+        "messages": [{"role": "user", "content": user_blocks}],
+    }
+
+    _generation_start = time.perf_counter()
+    response = bedrock.invoke_model_with_response_stream(
+        modelId=model_id,
+        body=json.dumps(request_body),
+        contentType="application/json",
+        accept="application/json",
+    )
+    invoke_handshake_ms = round((time.perf_counter() - _generation_start) * 1000, 1)
+
+    text_chunks: list[str] = []
+    input_tokens = 0
+    output_tokens = 0
+    cache_creation_input_tokens = 0
+    cache_read_input_tokens = 0
+    stop_reason = None
+    _first_token_at = None
+
+    for event in response["body"]:
+        chunk_bytes = event.get("chunk", {}).get("bytes")
+        if not chunk_bytes:
+            continue
+        event_data = json.loads(chunk_bytes.decode("utf-8"))
+        event_type = event_data.get("type")
+
+        if event_type == "content_block_delta":
+            delta = event_data.get("delta", {})
+            if delta.get("type") == "text_delta":
+                if _first_token_at is None:
+                    _first_token_at = time.perf_counter()
+                text_chunks.append(delta.get("text", ""))
+        elif event_type == "message_start":
+            usage = event_data.get("message", {}).get("usage", {})
+            input_tokens = usage.get("input_tokens", 0)
+            cache_creation_input_tokens = usage.get("cache_creation_input_tokens", 0)
+            cache_read_input_tokens = usage.get("cache_read_input_tokens", 0)
+        elif event_type == "message_delta":
+            output_tokens = event_data.get("usage", {}).get("output_tokens", 0)
+            stop_reason = event_data.get("delta", {}).get("stop_reason")
+
+    _stream_end = time.perf_counter()
+    response_text = "".join(text_chunks)
+    duration_seconds = round(_stream_end - _generation_start, 2)
+
+    ttft_ms = (
+        round((_first_token_at - _generation_start) * 1000, 1)
+        if _first_token_at is not None else None
+    )
+    streaming_ms = (
+        round((_stream_end - _first_token_at) * 1000, 1)
+        if _first_token_at is not None else None
+    )
+    output_tokens_per_sec = (
+        round(output_tokens / (streaming_ms / 1000), 1)
+        if streaming_ms and streaming_ms > 0 and output_tokens else None
+    )
+
+    if not response_text.strip():
+        raise NoteGenerationError("AI service returned an empty response. Please try again.")
+
+    response_text = re.sub(
+        r"^```(?:json)?\s*|\s*```$", "", response_text.strip(), flags=re.MULTILINE
+    )
+
+    try:
+        soap_content = _extract_json_from_response(response_text)
+    except json.JSONDecodeError as e:
+        logger.error(f"[BEDROCK] Failed to parse response as JSON (length={len(response_text)}): {e}")
+        raise NoteGenerationError(f"Failed to parse generated note: {str(e)}")
+
+    return {
+        "soap_content": soap_content,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cache_creation_input_tokens": cache_creation_input_tokens,
+        "cache_read_input_tokens": cache_read_input_tokens,
+        "duration_seconds": duration_seconds,
+        "ttft_ms": ttft_ms,
+        "streaming_ms": streaming_ms,
+        "output_tokens_per_sec": output_tokens_per_sec,
+        "stop_reason": stop_reason,
+        "invoke_handshake_ms": invoke_handshake_ms,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Compact prompt — same JSON schema, fewer style instructions
+# ---------------------------------------------------------------------------
+
+_COMPACT_SYSTEM_PROMPT = """\
+You are an expert medical documentation assistant for functional/integrative medicine. \
+Generate a comprehensive SOAP note and patient summary from a visit transcript.
+
+RULES:
+- Only include information explicitly stated in the transcript.
+- Never invent clinical details.
+- Omit any field where information is absent (no empty strings, nulls, or placeholders).
+- Use numerals for dosages/frequencies.
+- ROS must be a single string formatted as "System: findings" separated by newlines.
+- Respond with ONLY valid JSON matching the requested schema. No markdown, no explanation."""
+
+
+# ---------------------------------------------------------------------------
+# Section-specific prompts for parallel generation
+# ---------------------------------------------------------------------------
+
+_SECTION_SYSTEM = """\
+You are an expert medical documentation assistant for functional/integrative medicine. \
+Extract ONLY the requested section from a visit transcript. \
+Only include information explicitly stated. Never invent clinical details. \
+Omit any field where information is absent (no empty strings, nulls, or placeholders). \
+Respond with ONLY valid JSON matching the requested schema."""
+
+_SECTION_SCHEMAS = {
+    "subjective": """\
+Extract the SUBJECTIVE section from this transcript. Write a detailed HPI preserving \
+chronology, symptoms, severity, and patient-reported observations. Include ROS as a \
+single string ("System: findings" per line). Include medications, supplements, allergies, \
+social and family history when mentioned.
+
+```json
+{
+  "subjective": {
+    "reason_for_visit": "[omit if not mentioned]",
+    "history_of_present_illness": "[detailed narrative]",
+    "review_of_systems": "[single string, System: findings per line]",
+    "past_medical_history": "[omit if not mentioned]",
+    "current_medications": ["[name, dose, frequency]"],
+    "current_supplements": ["[name, dose, frequency]"],
+    "allergies": ["[allergen and reaction]"],
+    "social_history": "[omit if not mentioned]",
+    "family_history": "[omit if not mentioned]"
+  }
+}
+```
+Respond with ONLY the JSON object.""",
+
+    "objective": """\
+Extract the OBJECTIVE section from this transcript. Include vitals, physical exam \
+findings, lab results with actual values, imaging, and any patient-provided results.
+
+```json
+{
+  "objective": {
+    "vitals": {
+      "blood_pressure": "[omit if not mentioned]",
+      "heart_rate": "[omit if not mentioned]",
+      "temperature": "[omit if not mentioned]",
+      "weight": "[omit if not mentioned]",
+      "height": "[omit if not mentioned]",
+      "bmi": "[omit if not mentioned]"
+    },
+    "physical_exam": "[omit if not mentioned]",
+    "lab_results": "[omit if not mentioned]"
+  }
+}
+```
+Respond with ONLY the JSON object.""",
+
+    "assessment": """\
+Extract the ASSESSMENT section from this transcript. Include all diagnoses and a \
+problem-based clinical discussion. Only include interpretations the clinician stated.
+
+```json
+{
+  "assessment": {
+    "diagnoses": ["[diagnosis]"],
+    "clinical_discussion": [
+      {
+        "issue": "[clinical issue]",
+        "findings": "[supporting details]",
+        "interpretation": "[omit if clinician did not state]",
+        "plan_summary": "[what was recommended]"
+      }
+    ],
+    "clinical_reasoning": "[omit if not discussed]"
+  }
+}
+```
+Respond with ONLY the JSON object.""",
+
+    "plan": """\
+Extract the PLAN section from this transcript. Capture every recommendation: \
+prescriptions, supplements, labs, imaging, referrals, lifestyle, patient education, \
+and follow-up. Include reasons for changes when mentioned.
+
+```json
+{
+  "plan": {
+    "prescriptions": {
+      "add": ["[omit if none]"],
+      "continue": ["[omit if none]"],
+      "discontinue": ["[omit if none]"]
+    },
+    "supplements": {
+      "add": ["[omit if none]"],
+      "continue": ["[omit if none]"],
+      "discontinue": ["[omit if none]"]
+    },
+    "lab_orders": ["[test name]"],
+    "imaging_or_referrals": ["[imaging or referral]"],
+    "lifestyle_recommendations": "[omit if not mentioned]",
+    "patient_education": "[omit if not mentioned]",
+    "follow_up": "[omit if not mentioned]"
+  }
+}
+```
+Respond with ONLY the JSON object.""",
+
+    "patient_summary": """\
+Generate a PATIENT-FACING SUMMARY of the plan discussed in this visit. \
+Write for the patient, not the provider. Use plain language, short bullets. \
+Focus on what the patient should DO next.
+
+```json
+{
+  "patient_summary": {
+    "title": "Your Care Plan",
+    "visit_summary": "[1-3 warm sentences summarizing today's visit]",
+    "plan_sections": [
+      {
+        "heading": "[e.g. Medications, Supplements, Labs & Testing]",
+        "items": ["[clear patient-facing bullet]"]
+      }
+    ],
+    "watch_for": ["[symptoms or warning signs — omit if none]"],
+    "follow_up": ["[follow-up instructions — omit if none]"]
+  }
+}
+```
+Respond with ONLY the JSON object.""",
+}
+
+
+def _generate_parallel(transcript: str, additional_context: str = "") -> dict:
+    """Generate SOAP sections in parallel via concurrent Bedrock calls."""
+    import concurrent.futures
+
+    settings = get_settings()
+    bedrock = _get_bedrock_client()
+    model_id = settings.bedrock_model_id
+
+    if additional_context and additional_context.strip():
+        transcript_block = f"ADDITIONAL CONTEXT:\n{additional_context}\n\nTRANSCRIPT:\n{transcript}"
+    else:
+        transcript_block = f"TRANSCRIPT:\n{transcript}"
+
+    system_blocks = [{"type": "text", "text": _SECTION_SYSTEM}]
+    sections = ["subjective", "objective", "assessment", "plan", "patient_summary"]
+
+    def _call_section(section_name: str) -> tuple[str, dict]:
+        user_blocks = [
+            {"type": "text", "text": _SECTION_SCHEMAS[section_name]},
+            {"type": "text", "text": transcript_block},
+        ]
+        result = _invoke_bedrock_streaming(
+            bedrock, model_id, system_blocks, user_blocks,
+            max_tokens=settings.bedrock_max_tokens, temperature=settings.bedrock_temperature,
+        )
+        return section_name, result
+
+    _wall_start = time.perf_counter()
+
+    results: dict[str, dict] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(_call_section, s): s for s in sections}
+        for future in concurrent.futures.as_completed(futures):
+            section_name = futures[future]
+            try:
+                name, result = future.result()
+                results[name] = result
+            except Exception as e:
+                logger.error(f"[PARALLEL] Section {section_name} failed: {e}")
+                results[section_name] = {"soap_content": {}, "error": str(e)}
+
+    wall_seconds = round(time.perf_counter() - _wall_start, 2)
+
+    merged: dict = {}
+    total_input = 0
+    total_output = 0
+    total_cache_read = 0
+    total_cache_write = 0
+    section_timings: dict[str, dict] = {}
+
+    for name, result in results.items():
+        content = result.get("soap_content", {})
+        if name in content:
+            merged[name] = content[name]
+        elif name == "patient_summary" and "patient_summary" not in content:
+            merged.update(content)
+        else:
+            merged.update(content)
+
+        total_input += result.get("input_tokens", 0)
+        total_output += result.get("output_tokens", 0)
+        total_cache_read += result.get("cache_read_input_tokens", 0)
+        total_cache_write += result.get("cache_creation_input_tokens", 0)
+        section_timings[name] = {
+            "duration_s": result.get("duration_seconds"),
+            "ttft_ms": result.get("ttft_ms"),
+            "streaming_ms": result.get("streaming_ms"),
+        }
+
+    subj = merged.get("subjective")
+    if isinstance(subj, dict) and isinstance(subj.get("review_of_systems"), dict):
+        subj["review_of_systems"] = _normalize_ros(subj["review_of_systems"])
+    merged = _normalize_soap_content(merged)
+
+    merged["metadata"] = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "model_version": settings.bedrock_model_id,
+        "confidence_score": None,
+        "strategy": "parallel",
+        "usage": {
+            "input_tokens": total_input,
+            "output_tokens": total_output,
+            "cache_creation_input_tokens": total_cache_write,
+            "cache_read_input_tokens": total_cache_read,
+        },
+        "generation_duration_seconds": wall_seconds,
+        "timing": {
+            "total_seconds": wall_seconds,
+            "section_timings": section_timings,
+            "parallel_calls": len(sections),
+        },
+    }
+    return merged
+
+
 def generate_soap_note(transcript: str, additional_context: str = "") -> dict:
     """
     Generate a SOAP note from a transcript using AWS Bedrock.
+
+    The generation strategy is selected by the SOAP_GENERATION_STRATEGY setting:
+      - default:    single Sonnet call with full prompt (production behaviour)
+      - fast_model: single call with the configured fast model (Haiku-class)
+      - parallel:   concurrent per-section calls, merged into the same format
+      - compact:    single Sonnet call with a leaner prompt
 
     Args:
         transcript: The visit transcript text.
@@ -532,148 +892,78 @@ def generate_soap_note(transcript: str, additional_context: str = "") -> dict:
     if not transcript or not transcript.strip():
         raise NoteGenerationError("Transcript is empty. Cannot generate note.")
 
+    strategy = settings.soap_generation_strategy
+
+    if strategy == "parallel":
+        return _generate_parallel(transcript, additional_context)
+
     try:
         _client_init_start = time.perf_counter()
         bedrock = _get_bedrock_client()
         client_init_ms = round((time.perf_counter() - _client_init_start) * 1000, 1)
 
-        # Build variable transcript block (unique per request).
+        # Select model and prompt based on strategy
+        if strategy == "fast_model":
+            model_id = settings.bedrock_fast_model_id
+            sys_prompt = SYSTEM_PROMPT
+            schema_prompt = _USER_PROMPT_SCHEMA
+        elif strategy == "compact":
+            model_id = settings.bedrock_model_id
+            sys_prompt = _COMPACT_SYSTEM_PROMPT
+            schema_prompt = _USER_PROMPT_SCHEMA
+        else:
+            model_id = settings.bedrock_model_id
+            sys_prompt = SYSTEM_PROMPT
+            schema_prompt = _USER_PROMPT_SCHEMA
+
         if additional_context and additional_context.strip():
             transcript_block = f"ADDITIONAL CONTEXT:\n{additional_context}\n\nTRANSCRIPT:\n{transcript}"
         else:
             transcript_block = f"TRANSCRIPT:\n{transcript}"
 
-        # Structure the request so Anthropic prompt caching can store the
-        # static prefix (system prompt + JSON schema instructions) and skip
-        # re-processing it on subsequent calls.  Only the variable transcript
-        # block differs between requests, keeping TTFT low after the first
-        # cache-write.
-        request_body = {
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": settings.bedrock_max_tokens,
-            "temperature": settings.bedrock_temperature,
-            "system": [
-                {
-                    "type": "text",
-                    "text": SYSTEM_PROMPT,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": _USER_PROMPT_SCHEMA,
-                            "cache_control": {"type": "ephemeral"},
-                        },
-                        {
-                            "type": "text",
-                            "text": transcript_block,
-                        },
-                    ],
-                }
-            ],
-        }
+        system_blocks = [
+            {"type": "text", "text": sys_prompt, "cache_control": {"type": "ephemeral"}},
+        ]
+        user_blocks = [
+            {"type": "text", "text": schema_prompt, "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": transcript_block},
+        ]
 
         logger.info(
-            f"[BEDROCK REQUEST] model={settings.bedrock_model_id} "
+            f"[BEDROCK REQUEST] strategy={strategy} model={model_id} "
             f"max_tokens={settings.bedrock_max_tokens} temperature={settings.bedrock_temperature} "
             f"transcript_len={len(transcript)} context_len={len(additional_context or '')}"
         )
 
-        _generation_start = time.perf_counter()
-        response = bedrock.invoke_model_with_response_stream(
-            modelId=settings.bedrock_model_id,
-            body=json.dumps(request_body),
-            contentType="application/json",
-            accept="application/json",
+        result = _invoke_bedrock_streaming(
+            bedrock, model_id, system_blocks, user_blocks,
+            max_tokens=settings.bedrock_max_tokens, temperature=settings.bedrock_temperature,
         )
-        # Time for the invoke call to return the stream handle (before any tokens).
-        invoke_handshake_ms = round((time.perf_counter() - _generation_start) * 1000, 1)
-
-        text_chunks: list[str] = []
-        input_tokens = 0
-        output_tokens = 0
-        cache_creation_input_tokens = 0
-        cache_read_input_tokens = 0
-        stop_reason = None
-        _first_token_at = None
-
-        for event in response["body"]:
-            chunk_bytes = event.get("chunk", {}).get("bytes")
-            if not chunk_bytes:
-                continue
-            event_data = json.loads(chunk_bytes.decode("utf-8"))
-            event_type = event_data.get("type")
-
-            if event_type == "content_block_delta":
-                delta = event_data.get("delta", {})
-                if delta.get("type") == "text_delta":
-                    if _first_token_at is None:
-                        _first_token_at = time.perf_counter()
-                    text_chunks.append(delta.get("text", ""))
-            elif event_type == "message_start":
-                usage = event_data.get("message", {}).get("usage", {})
-                input_tokens = usage.get("input_tokens", 0)
-                cache_creation_input_tokens = usage.get("cache_creation_input_tokens", 0)
-                cache_read_input_tokens = usage.get("cache_read_input_tokens", 0)
-            elif event_type == "message_delta":
-                output_tokens = event_data.get("usage", {}).get("output_tokens", 0)
-                stop_reason = event_data.get("delta", {}).get("stop_reason")
-
-        _stream_end = time.perf_counter()
-        response_text = "".join(text_chunks)
-        duration_seconds = round(_stream_end - _generation_start, 2)
-
-        # Timing breakdown to diagnose slow generation: TTFT (time from request
-        # fire to first visible token — input/queue/throttle bound) vs. streaming
-        # time (first to last token — output bound). Lumping these hides the cause.
-        ttft_ms = (
-            round((_first_token_at - _generation_start) * 1000, 1)
-            if _first_token_at is not None
-            else None
-        )
-        streaming_ms = (
-            round((_stream_end - _first_token_at) * 1000, 1)
-            if _first_token_at is not None
-            else None
-        )
-        output_tokens_per_sec = (
-            round(output_tokens / (streaming_ms / 1000), 1)
-            if streaming_ms and streaming_ms > 0 and output_tokens
-            else None
-        )
-
-        if not response_text.strip():
-            logger.error("[BEDROCK STREAM] Stream completed but produced no text content")
-            raise NoteGenerationError("AI service returned an empty response. Please try again.")
-
-        # Strip any code fences the model may include
-        response_text = re.sub(
-            r"^```(?:json)?\s*|\s*```$", "", response_text.strip(), flags=re.MULTILINE
-        )
+        soap_content = result["soap_content"]
+        input_tokens = result["input_tokens"]
+        output_tokens = result["output_tokens"]
+        cache_creation_input_tokens = result["cache_creation_input_tokens"]
+        cache_read_input_tokens = result["cache_read_input_tokens"]
+        duration_seconds = result["duration_seconds"]
+        ttft_ms = result["ttft_ms"]
+        streaming_ms = result["streaming_ms"]
+        output_tokens_per_sec = result["output_tokens_per_sec"]
+        stop_reason = result["stop_reason"]
+        invoke_handshake_ms = result["invoke_handshake_ms"]
 
         logger.info(
             f"[BEDROCK RESPONSE] input_tokens={input_tokens} output_tokens={output_tokens} "
             f"cache_read={cache_read_input_tokens} cache_write={cache_creation_input_tokens} "
-            f"response_len={len(response_text)} duration_seconds={duration_seconds}"
+            f"duration_seconds={duration_seconds}"
         )
         logger.info(
-            f"[SOAP TIMING] total_s={duration_seconds} ttft_ms={ttft_ms} "
+            f"[SOAP TIMING] strategy={strategy} total_s={duration_seconds} ttft_ms={ttft_ms} "
             f"streaming_ms={streaming_ms} tok_per_s={output_tokens_per_sec} "
             f"client_init_ms={client_init_ms} invoke_handshake_ms={invoke_handshake_ms} "
             f"input_tokens={input_tokens} output_tokens={output_tokens} "
             f"cache_read={cache_read_input_tokens} cache_write={cache_creation_input_tokens} "
             f"stop_reason={stop_reason} transcript_len={len(transcript)}"
         )
-        # Parse JSON response - handle potential markdown code blocks or extra text
-        try:
-            soap_content = _extract_json_from_response(response_text)
-        except json.JSONDecodeError as e:
-            logger.error(f"[BEDROCK] Failed to parse response as JSON (length={len(response_text)}): {e}")
-            raise NoteGenerationError(f"Failed to parse generated note: {str(e)}")
 
         # Coerce review_of_systems to a string if Bedrock returned a dict
         subj = soap_content.get("subjective")
@@ -694,8 +984,9 @@ def generate_soap_note(transcript: str, additional_context: str = "") -> dict:
 
         soap_content["metadata"] = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "model_version": settings.bedrock_model_id,
+            "model_version": model_id,
             "confidence_score": None,
+            "strategy": strategy,
             "usage": {
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,

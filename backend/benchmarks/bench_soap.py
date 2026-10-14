@@ -2,16 +2,21 @@
 """Benchmark and quality-check the SOAP note generation pipeline.
 
 Runs generate_soap_note() against a fixed synthetic transcript and reports
-timing breakdown, token usage, and prompt-cache metrics.  Optionally compares
-two saved outputs (before/after) for section completeness and key-fact
-preservation.
+timing breakdown, token usage, and prompt-cache metrics.  Supports running
+multiple generation strategies and comparing them side-by-side.
 
 Usage:
-    # Single run — prints timing to stdout, saves output to a JSON file
+    # Single run with current default strategy
     python benchmarks/bench_soap.py
 
-    # Multiple iterations to estimate variance (first run warms cache)
+    # Multiple iterations (first run warms prompt cache)
     python benchmarks/bench_soap.py --iterations 3
+
+    # Run a specific strategy
+    python benchmarks/bench_soap.py --strategy fast_model
+
+    # Compare all strategies (runs each once)
+    python benchmarks/bench_soap.py --compare-strategies
 
     # Quality comparison of two saved runs
     python benchmarks/bench_soap.py --compare baseline.json optimized.json
@@ -56,6 +61,8 @@ KEY_FACTS = [
     ("objective", "lab_results", "tpo"),
 ]
 
+ALL_STRATEGIES = ["default", "fast_model", "compact", "parallel"]
+
 
 def _deep_text(obj) -> str:
     """Recursively extract all string content from a nested dict/list."""
@@ -74,7 +81,7 @@ def check_quality(soap: dict) -> dict:
     missing_sections = EXPECTED_SECTIONS - present_sections
 
     has_patient_summary = "patient_summary" in soap
-    ps_keys = set()
+    ps_keys: set[str] = set()
     if has_patient_summary and isinstance(soap["patient_summary"], dict):
         ps_keys = EXPECTED_PATIENT_SUMMARY_KEYS.intersection(soap["patient_summary"].keys())
 
@@ -105,15 +112,87 @@ def check_quality(soap: dict) -> dict:
     }
 
 
-def run_benchmark(transcript: str, iterations: int = 1) -> list[dict]:
-    """Run generate_soap_note and return timing + quality for each iteration."""
+def check_cross_section_consistency(soap: dict) -> dict:
+    """Check that information is consistent across SOAP sections.
+
+    Validates structural coherence: that the plan is not empty when there are
+    diagnoses, and that medications in the plan have a corresponding diagnosis
+    somewhere in the assessment.
+    """
+    issues: list[str] = []
+
+    assessment_text = _deep_text(soap.get("assessment", {})).lower()
+    plan_text = _deep_text(soap.get("plan", {})).lower()
+
+    diagnoses = soap.get("assessment", {}).get("diagnoses", [])
+    has_diagnoses = isinstance(diagnoses, list) and len(diagnoses) > 0
+    has_plan_content = bool(plan_text.strip())
+
+    if has_diagnoses and not has_plan_content:
+        issues.append("Assessment has diagnoses but plan section is empty")
+
+    plan_meds = _deep_text(soap.get("plan", {}).get("prescriptions", {})).lower()
+    if "levothyroxine" in plan_meds and "thyroid" not in assessment_text and "hypothyroid" not in assessment_text:
+        issues.append("Plan prescribes levothyroxine but assessment lacks thyroid diagnosis")
+
+    return {
+        "consistent": len(issues) == 0,
+        "issues": issues,
+    }
+
+
+def _print_run(result: dict) -> None:
+    """Print a single run's timing and quality summary."""
+    timing = result.get("timing", {})
+    usage = result.get("usage", {})
+    quality = result.get("quality", {})
+    strategy = result.get("strategy", "unknown")
+
+    print(f"  Strategy:         {strategy}")
+    print(f"  Wall time:        {result.get('wall_seconds')}s")
+
+    if "section_timings" in timing:
+        for sec, st in timing.get("section_timings", {}).items():
+            print(f"    {sec:20s} {st.get('duration_s', '?')}s  (TTFT {st.get('ttft_ms', '?')}ms)")
+    else:
+        print(f"  TTFT:             {timing.get('ttft_ms')}ms")
+        print(f"  Streaming:        {timing.get('streaming_ms')}ms")
+        print(f"  Client init:      {timing.get('client_init_ms')}ms")
+        print(f"  Invoke handshake: {timing.get('invoke_handshake_ms')}ms")
+        print(f"  Tokens/sec:       {timing.get('output_tokens_per_sec')}")
+
+    print(f"  Input tokens:     {usage.get('input_tokens')}")
+    print(f"  Output tokens:    {usage.get('output_tokens')}")
+    print(f"  Cache write:      {usage.get('cache_creation_input_tokens', 0)}")
+    print(f"  Cache read:       {usage.get('cache_read_input_tokens', 0)}")
+    print(f"  Sections:         {quality.get('section_completeness')}")
+    print(f"  Patient summary:  {'yes' if quality.get('has_patient_summary') else 'NO'}")
+    print(f"  Key facts:        {quality.get('key_facts_found')}")
+
+    consistency = result.get("consistency", {})
+    if consistency:
+        status = "PASS" if consistency.get("consistent") else "FAIL"
+        print(f"  Consistency:      {status}")
+        for issue in consistency.get("issues", []):
+            print(f"    ! {issue}")
+
+
+def run_single(transcript: str, strategy: str = "default", iterations: int = 1) -> list[dict]:
+    """Run generate_soap_note with the given strategy."""
+    import os
+    os.environ["SOAP_GENERATION_STRATEGY"] = strategy
+
+    from importlib import reload
+    import app.config
+    reload(app.config)
+    app.config.get_settings.cache_clear()
+
     from app.services.note_generation import generate_soap_note
 
     results = []
     for i in range(iterations):
-        label = f"Run {i + 1}/{iterations}"
         print(f"\n{'=' * 60}")
-        print(f"  {label}")
+        print(f"  Run {i + 1}/{iterations}  [strategy={strategy}]")
         print(f"{'=' * 60}")
 
         wall_start = time.perf_counter()
@@ -123,34 +202,65 @@ def run_benchmark(transcript: str, iterations: int = 1) -> list[dict]:
         meta = soap.get("metadata", {})
         usage = meta.get("usage", {})
         timing = meta.get("timing", {})
-
         quality = check_quality(soap)
+        consistency = check_cross_section_consistency(soap)
 
         result = {
             "iteration": i + 1,
+            "strategy": strategy,
             "wall_seconds": wall_seconds,
             "timing": timing,
             "usage": usage,
             "quality": quality,
+            "consistency": consistency,
             "soap_output": soap,
         }
         results.append(result)
-
-        print(f"  Wall time:        {wall_seconds}s")
-        print(f"  TTFT:             {timing.get('ttft_ms')}ms")
-        print(f"  Streaming:        {timing.get('streaming_ms')}ms")
-        print(f"  Client init:      {timing.get('client_init_ms')}ms")
-        print(f"  Invoke handshake: {timing.get('invoke_handshake_ms')}ms")
-        print(f"  Tokens/sec:       {timing.get('output_tokens_per_sec')}")
-        print(f"  Input tokens:     {usage.get('input_tokens')}")
-        print(f"  Output tokens:    {usage.get('output_tokens')}")
-        print(f"  Cache write:      {usage.get('cache_creation_input_tokens', 0)}")
-        print(f"  Cache read:       {usage.get('cache_read_input_tokens', 0)}")
-        print(f"  Sections:         {quality['section_completeness']}")
-        print(f"  Patient summary:  {'yes' if quality['has_patient_summary'] else 'NO'}")
-        print(f"  Key facts:        {quality['key_facts_found']}")
+        _print_run(result)
 
     return results
+
+
+def run_all_strategies(transcript: str) -> dict:
+    """Run each strategy once and return a comparison dict."""
+    all_results: dict[str, dict] = {}
+    for strategy in ALL_STRATEGIES:
+        print(f"\n{'#' * 60}")
+        print(f"  STRATEGY: {strategy}")
+        print(f"{'#' * 60}")
+        runs = run_single(transcript, strategy=strategy, iterations=1)
+        all_results[strategy] = runs[0]
+
+    print(f"\n\n{'=' * 80}")
+    print("  COMPARISON TABLE")
+    print(f"{'=' * 80}")
+
+    header = f"{'Metric':<30}"
+    for s in ALL_STRATEGIES:
+        header += f"  {s:>12}"
+    print(header)
+    print("-" * 80)
+
+    def _row(label: str, getter):
+        line = f"{label:<30}"
+        for s in ALL_STRATEGIES:
+            val = getter(all_results[s])
+            line += f"  {str(val):>12}"
+        print(line)
+
+    _row("Wall time (s)", lambda r: r.get("wall_seconds", "?"))
+    _row("TTFT (ms)", lambda r: r.get("timing", {}).get("ttft_ms", "—"))
+    _row("Streaming (ms)", lambda r: r.get("timing", {}).get("streaming_ms", "—"))
+    _row("Input tokens", lambda r: r.get("usage", {}).get("input_tokens", "?"))
+    _row("Output tokens", lambda r: r.get("usage", {}).get("output_tokens", "?"))
+    _row("Cache read tokens", lambda r: r.get("usage", {}).get("cache_read_input_tokens", 0))
+    _row("Sections present", lambda r: r.get("quality", {}).get("section_completeness", "?"))
+    _row("Key facts found", lambda r: r.get("quality", {}).get("key_facts_found", "?"))
+    _row("Patient summary", lambda r: "yes" if r.get("quality", {}).get("has_patient_summary") else "NO")
+    _row("Cross-section OK", lambda r: "PASS" if r.get("consistency", {}).get("consistent") else "FAIL")
+
+    print()
+    return all_results
 
 
 def compare_outputs(path_a: str, path_b: str) -> None:
@@ -211,8 +321,15 @@ def compare_outputs(path_a: str, path_b: str) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="Benchmark SOAP note generation")
-    parser.add_argument("--iterations", type=int, default=1, help="Number of generation runs")
-    parser.add_argument("--output", type=str, default=None, help="Save results to JSON file")
+    parser.add_argument("--iterations", type=int, default=1,
+                        help="Number of generation runs per strategy")
+    parser.add_argument("--strategy", type=str, default=None,
+                        choices=ALL_STRATEGIES,
+                        help="Run a specific strategy (default: use SOAP_GENERATION_STRATEGY env)")
+    parser.add_argument("--compare-strategies", action="store_true",
+                        help="Run all strategies once and print comparison table")
+    parser.add_argument("--output", type=str, default=None,
+                        help="Save results to JSON file")
     parser.add_argument("--compare", nargs=2, metavar=("BASELINE", "OPTIMIZED"),
                         help="Compare two saved result files")
     args = parser.parse_args()
@@ -225,12 +342,25 @@ def main():
         transcript = f.read()
 
     print(f"Transcript length: {len(transcript)} chars")
-    results = run_benchmark(transcript, iterations=args.iterations)
+
+    if args.compare_strategies:
+        all_results = run_all_strategies(transcript)
+        out_path = args.output
+        if not out_path:
+            ts = time.strftime("%Y%m%d_%H%M%S")
+            out_path = os.path.join(SCRIPT_DIR, f"comparison_{ts}.json")
+        with open(out_path, "w") as f:
+            json.dump(all_results, f, indent=2, default=str)
+        print(f"Results saved to {out_path}")
+        return
+
+    strategy = args.strategy or os.environ.get("SOAP_GENERATION_STRATEGY", "default")
+    results = run_single(transcript, strategy=strategy, iterations=args.iterations)
 
     out_path = args.output
     if not out_path:
         ts = time.strftime("%Y%m%d_%H%M%S")
-        out_path = os.path.join(SCRIPT_DIR, f"result_{ts}.json")
+        out_path = os.path.join(SCRIPT_DIR, f"result_{strategy}_{ts}.json")
 
     with open(out_path, "w") as f:
         json.dump({"results": results}, f, indent=2, default=str)
