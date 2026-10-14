@@ -125,10 +125,9 @@ class TestWorkerHandleGenerateNote:
         mock_factory, mock_session = self._build_session_factory(note, visit)
 
         mock_engine = AsyncMock()
-        with patch("app.worker.create_async_engine", return_value=mock_engine):
-            with patch("app.worker.async_sessionmaker", return_value=mock_factory):
-                with patch("app.worker.generate_soap_note") as mock_generate:
-                    asyncio.run(_handle_generate_note({"note_id": str(note.id)}))
+        with patch("app.worker._get_worker_db", return_value=(mock_engine, mock_factory)):
+            with patch("app.worker.generate_soap_note") as mock_generate:
+                asyncio.run(_handle_generate_note({"note_id": str(note.id)}))
 
         mock_generate.assert_not_called()
 
@@ -141,13 +140,12 @@ class TestWorkerHandleGenerateNote:
         mock_factory, mock_session = self._build_session_factory(note, visit)
 
         mock_engine = AsyncMock()
-        with patch("app.worker.create_async_engine", return_value=mock_engine):
-            with patch("app.worker.async_sessionmaker", return_value=mock_factory):
-                with patch(
-                    "app.worker.generate_soap_note",
-                    side_effect=NoteGenerationError("Boom"),
-                ):
-                    asyncio.run(_handle_generate_note({"note_id": str(note.id)}))
+        with patch("app.worker._get_worker_db", return_value=(mock_engine, mock_factory)):
+            with patch(
+                "app.worker.generate_soap_note",
+                side_effect=NoteGenerationError("Boom"),
+            ):
+                asyncio.run(_handle_generate_note({"note_id": str(note.id)}))
 
         assert note.status == "failed"
 
@@ -160,10 +158,9 @@ class TestWorkerHandleGenerateNote:
         mock_factory, _ = self._build_session_factory(note, visit)
         generated = {"metadata": {"timing": {"total_seconds": 1.0}}}
 
-        with patch("app.worker.create_async_engine", return_value=AsyncMock()):
-            with patch("app.worker.async_sessionmaker", return_value=mock_factory):
-                with patch("app.worker.generate_soap_note", return_value=generated):
-                    asyncio.run(_handle_generate_note({"note_id": str(note.id)}))
+        with patch("app.worker._get_worker_db", return_value=(AsyncMock(), mock_factory)):
+            with patch("app.worker.generate_soap_note", return_value=generated):
+                asyncio.run(_handle_generate_note({"note_id": str(note.id)}))
 
         timing = note.content["metadata"]["timing"]
         assert timing["total_seconds"] == 1.0

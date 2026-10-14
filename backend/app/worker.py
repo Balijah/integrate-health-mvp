@@ -63,14 +63,28 @@ def _heartbeat(
             break
 
 
+_worker_engine = None
+_worker_session_factory = None
+
+
+def _get_worker_db():
+    """Return a cached async engine and session factory for the worker process."""
+    global _worker_engine, _worker_session_factory
+    if _worker_engine is None:
+        settings = get_settings()
+        _worker_engine = create_async_engine(settings.database_url)
+        _worker_session_factory = async_sessionmaker(
+            _worker_engine, class_=AsyncSession, expire_on_commit=False,
+        )
+    return _worker_engine, _worker_session_factory
+
+
 async def _handle_generate_note(body: dict) -> None:
     """Process a generate_note task message."""
-    settings = get_settings()
     note_uuid = uuid.UUID(body["note_id"])
     additional_context = body.get("additional_context", "")
 
-    engine = create_async_engine(settings.database_url)
-    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    engine, session_factory = _get_worker_db()
 
     try:
         # Fetch note and visit in a single read session
@@ -145,7 +159,7 @@ async def _handle_generate_note(body: dict) -> None:
                     note.status = new_status
                     logger.info(f"[WORKER] Note {note_uuid} → status={new_status}")
     finally:
-        await engine.dispose()
+        pass
 
 
 def run_worker() -> None:
