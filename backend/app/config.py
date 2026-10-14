@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     bedrock_max_tokens: int = 16384
     bedrock_temperature: float = 0.3
 
+    # Experimental SOAP generation strategy (default | fast_model | parallel | compact)
+    soap_generation_strategy: str = "default"
+    # Model ID used by the "fast_model" strategy (Haiku-class for lower latency)
+    bedrock_fast_model_id: str = "us.anthropic.claude-haiku-4-5-20250929-v1:0"
+
     # Task Queue (SQS)
     sqs_queue_url: str = ""  # Set in production; empty = local BackgroundTasks fallback
 

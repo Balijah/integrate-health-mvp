@@ -2,8 +2,9 @@
 
 These tests verify:
 1. The quality checker correctly detects section completeness and key facts
-2. The Bedrock request body uses structured content blocks for prompt caching
-3. Cache metrics flow through to the response metadata
+2. The cross-section consistency checker detects assessment/plan mismatches
+3. The Bedrock request body uses structured content blocks for prompt caching
+4. Cache metrics flow through to the response metadata
 """
 
 import json
@@ -175,3 +176,31 @@ class TestPromptCachingStructure:
         usage = result["metadata"]["usage"]
         assert usage["cache_read_input_tokens"] == 0
         assert usage["cache_creation_input_tokens"] == 2300
+
+
+class TestCrossSectionConsistency:
+    """Verify the cross-section consistency checker."""
+
+    def _get_checker(self):
+        import importlib
+        import sys
+        import os
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "benchmarks"))
+        import bench_soap
+        importlib.reload(bench_soap)
+        return bench_soap.check_cross_section_consistency
+
+    def test_complete_soap_is_consistent(self):
+        check = self._get_checker()
+        result = check(COMPLETE_SOAP)
+        assert result["consistent"] is True
+        assert result["issues"] == []
+
+    def test_detects_empty_plan_with_diagnoses(self):
+        check = self._get_checker()
+        broken = dict(COMPLETE_SOAP)
+        broken["assessment"] = {"diagnoses": ["Obscure rare condition XYZ"]}
+        broken["plan"] = {}
+        result = check(broken)
+        assert result["consistent"] is False
+        assert any("empty" in i.lower() for i in result["issues"])
