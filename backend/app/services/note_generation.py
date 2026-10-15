@@ -8,6 +8,7 @@ via AWS Bedrock.
 import json
 import logging
 import re
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -17,6 +18,10 @@ from botocore.exceptions import ClientError, BotoCoreError, EventStreamError
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+_bedrock_client = None
+_bedrock_client_lock = threading.Lock()
+_bedrock_client_region: str | None = None
 
 
 class NoteGenerationError(Exception):
@@ -261,16 +266,17 @@ Before responding, verify:
 
 The final note should feel thorough enough that a provider reviewing it later would not need to return to the transcript to understand what happened during the visit."""
 
-USER_PROMPT_TEMPLATE = """Generate a SOAP note from the following patient visit transcript.
-
-{additional_context_block}TRANSCRIPT:
-{transcript}
+# Static instruction prefix — identical across all requests and placed first
+# in the user message so Anthropic prompt caching can store the system prompt
+# plus this block as a reusable prefix (~2300 tokens saved on cache hits).
+_USER_PROMPT_SCHEMA = """\
+Generate a SOAP note from the patient visit transcript provided below.
 
 IMPORTANT: Values shown in [brackets] below are field descriptions only — never output bracket text. Omit any key for which the transcript contains no information.
 
 ```json
-{{
-  "subjective": {{
+{
+  "subjective": {
     "reason_for_visit": "[omit if not mentioned]",
     "history_of_present_illness": "[omit if not mentioned]",
     "review_of_systems": "[omit if not mentioned]",
@@ -280,78 +286,97 @@ IMPORTANT: Values shown in [brackets] below are field descriptions only — neve
     "allergies": ["[allergen and reaction — omit array if none mentioned]"],
     "social_history": "[omit if not mentioned]",
     "family_history": "[omit if not mentioned]"
-  }},
-  "objective": {{
-    "vitals": {{
+  },
+  "objective": {
+    "vitals": {
       "blood_pressure": "[omit if not mentioned]",
       "heart_rate": "[omit if not mentioned]",
       "temperature": "[omit if not mentioned]",
       "weight": "[omit if not mentioned]",
       "height": "[omit if not mentioned]",
       "bmi": "[omit if not mentioned]"
-    }},
+    },
     "physical_exam": "[omit if not mentioned]",
     "lab_results": "[omit if not mentioned]"
-  }},
-  "assessment": {{
+  },
+  "assessment": {
     "diagnoses": ["[diagnosis — omit array if none mentioned]"],
     "clinical_discussion": [
-      {{
+      {
         "issue": "[clinical issue]",
         "findings": "[omit if not mentioned]",
         "interpretation": "[omit if not mentioned]",
         "plan_summary": "[omit if not mentioned]"
-      }}
+      }
     ],
     "clinical_reasoning": "[omit if not mentioned]"
-  }},
-  "plan": {{
-    "prescriptions": {{
+  },
+  "plan": {
+    "prescriptions": {
       "add": ["[omit array if none]"],
       "continue": ["[omit array if none]"],
       "discontinue": ["[omit array if none]"]
-    }},
-    "supplements": {{
+    },
+    "supplements": {
       "add": ["[omit array if none]"],
       "continue": ["[omit array if none]"],
       "discontinue": ["[omit array if none]"]
-    }},
+    },
     "lab_orders": ["[test; include indication only if explicitly stated — omit array if none]"],
     "imaging_or_referrals": ["[imaging or referral; include reason only if explicitly stated — omit array if none]"],
     "lifestyle_recommendations": "[omit if not mentioned]",
     "patient_education": "[omit if not mentioned]",
     "follow_up": "[omit if not mentioned]"
-  }},
-  "patient_summary": {{
+  },
+  "patient_summary": {
     "title": "Your Care Plan",
     "visit_summary": "[brief patient-friendly summary of today's visit]",
     "plan_sections": [
-      {{
+      {
         "heading": "[section heading, e.g. Medications, Supplements, Labs & Testing]",
         "items": ["[clear patient-facing bullet point]"]
-      }}
+      }
     ],
     "watch_for": ["[symptoms, warning signs, or things to monitor — omit array if none]"],
     "follow_up": ["[follow-up instructions — omit array if none]"]
-  }}
-}}
+  }
+}
 ```
 
 Respond with ONLY the JSON object, no additional text."""
 
 
 def _get_bedrock_client():
-    """Get boto3 Bedrock Runtime client with extended timeouts for long transcripts."""
-    from botocore.config import Config
+    """Return a cached boto3 Bedrock Runtime client.
+
+    The client is thread-safe and reused across calls to avoid the overhead of
+    credential resolution, endpoint discovery, and HTTP session setup on every
+    note generation request (~50-200 ms per cold creation).  A new client is
+    created only on the first call or when the configured AWS region changes.
+    """
+    global _bedrock_client, _bedrock_client_region
+
     settings = get_settings()
-    config = Config(
-        read_timeout=600,    # 10 min per-chunk guard — with streaming, bytes flow continuously so
-                             # this only fires if the socket goes completely silent between chunks,
-                             # which should never happen under normal Bedrock operation
-        connect_timeout=10,
-        retries={"max_attempts": 1},
-    )
-    return boto3.client("bedrock-runtime", region_name=settings.aws_region, config=config)
+    region = settings.aws_region
+
+    if _bedrock_client is not None and _bedrock_client_region == region:
+        return _bedrock_client
+
+    with _bedrock_client_lock:
+        if _bedrock_client is not None and _bedrock_client_region == region:
+            return _bedrock_client
+
+        from botocore.config import Config
+        config = Config(
+            read_timeout=600,
+            connect_timeout=10,
+            retries={"max_attempts": 1},
+        )
+        _bedrock_client = boto3.client(
+            "bedrock-runtime", region_name=region, config=config,
+        )
+        _bedrock_client_region = region
+        return _bedrock_client
 
 
 def _normalize_ros(value) -> str:
@@ -508,38 +533,54 @@ def generate_soap_note(transcript: str, additional_context: str = "") -> dict:
         raise NoteGenerationError("Transcript is empty. Cannot generate note.")
 
     try:
-        # Initialize Bedrock client
         _client_init_start = time.perf_counter()
         bedrock = _get_bedrock_client()
         client_init_ms = round((time.perf_counter() - _client_init_start) * 1000, 1)
 
-        # Build additional context block
+        # Build variable transcript block (unique per request).
         if additional_context and additional_context.strip():
-            additional_context_block = f"ADDITIONAL CONTEXT:\n{additional_context}\n\n"
+            transcript_block = f"ADDITIONAL CONTEXT:\n{additional_context}\n\nTRANSCRIPT:\n{transcript}"
         else:
-            additional_context_block = ""
+            transcript_block = f"TRANSCRIPT:\n{transcript}"
 
-        user_prompt = USER_PROMPT_TEMPLATE.format(
-            additional_context_block=additional_context_block,
-            transcript=transcript,
-        )
-
-        # Prepare request body for Bedrock
+        # Structure the request so Anthropic prompt caching can store the
+        # static prefix (system prompt + JSON schema instructions) and skip
+        # re-processing it on subsequent calls.  Only the variable transcript
+        # block differs between requests, keeping TTFT low after the first
+        # cache-write.
         request_body = {
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": settings.bedrock_max_tokens,
             "temperature": settings.bedrock_temperature,
-            "system": SYSTEM_PROMPT,
+            "system": [
+                {
+                    "type": "text",
+                    "text": SYSTEM_PROMPT,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
             "messages": [
-                {"role": "user", "content": user_prompt}
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": _USER_PROMPT_SCHEMA,
+                            "cache_control": {"type": "ephemeral"},
+                        },
+                        {
+                            "type": "text",
+                            "text": transcript_block,
+                        },
+                    ],
+                }
             ],
         }
 
-        # Log request metadata only; prompts and transcripts can contain PHI.
         logger.info(
             f"[BEDROCK REQUEST] model={settings.bedrock_model_id} "
             f"max_tokens={settings.bedrock_max_tokens} temperature={settings.bedrock_temperature} "
-            f"transcript_len={len(transcript)} context_len={len(additional_context_block)}"
+            f"transcript_len={len(transcript)} context_len={len(additional_context or '')}"
         )
 
         _generation_start = time.perf_counter()
@@ -552,14 +593,13 @@ def generate_soap_note(transcript: str, additional_context: str = "") -> dict:
         # Time for the invoke call to return the stream handle (before any tokens).
         invoke_handshake_ms = round((time.perf_counter() - _generation_start) * 1000, 1)
 
-        # Accumulate text chunks and token usage from the streaming event sequence.
-        # Bytes arrive continuously so the socket never goes cold — eliminating the
-        # read timeout failure mode that affects large transcripts.
-        text_chunks = []
+        text_chunks: list[str] = []
         input_tokens = 0
         output_tokens = 0
+        cache_creation_input_tokens = 0
+        cache_read_input_tokens = 0
         stop_reason = None
-        _first_token_at = None  # perf_counter timestamp of the first text delta
+        _first_token_at = None
 
         for event in response["body"]:
             chunk_bytes = event.get("chunk", {}).get("bytes")
@@ -575,7 +615,10 @@ def generate_soap_note(transcript: str, additional_context: str = "") -> dict:
                         _first_token_at = time.perf_counter()
                     text_chunks.append(delta.get("text", ""))
             elif event_type == "message_start":
-                input_tokens = event_data.get("message", {}).get("usage", {}).get("input_tokens", 0)
+                usage = event_data.get("message", {}).get("usage", {})
+                input_tokens = usage.get("input_tokens", 0)
+                cache_creation_input_tokens = usage.get("cache_creation_input_tokens", 0)
+                cache_read_input_tokens = usage.get("cache_read_input_tokens", 0)
             elif event_type == "message_delta":
                 output_tokens = event_data.get("usage", {}).get("output_tokens", 0)
                 stop_reason = event_data.get("delta", {}).get("stop_reason")
@@ -614,6 +657,7 @@ def generate_soap_note(transcript: str, additional_context: str = "") -> dict:
 
         logger.info(
             f"[BEDROCK RESPONSE] input_tokens={input_tokens} output_tokens={output_tokens} "
+            f"cache_read={cache_read_input_tokens} cache_write={cache_creation_input_tokens} "
             f"response_len={len(response_text)} duration_seconds={duration_seconds}"
         )
         logger.info(
@@ -621,6 +665,7 @@ def generate_soap_note(transcript: str, additional_context: str = "") -> dict:
             f"streaming_ms={streaming_ms} tok_per_s={output_tokens_per_sec} "
             f"client_init_ms={client_init_ms} invoke_handshake_ms={invoke_handshake_ms} "
             f"input_tokens={input_tokens} output_tokens={output_tokens} "
+            f"cache_read={cache_read_input_tokens} cache_write={cache_creation_input_tokens} "
             f"stop_reason={stop_reason} transcript_len={len(transcript)}"
         )
         # Parse JSON response - handle potential markdown code blocks or extra text
@@ -647,14 +692,15 @@ def generate_soap_note(transcript: str, additional_context: str = "") -> dict:
                 "Please record a visit with clinical details and try again."
             )
 
-        # Add metadata including token usage
         soap_content["metadata"] = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "model_version": settings.bedrock_model_id,
-            "confidence_score": None,  # Could be enhanced with confidence estimation
+            "confidence_score": None,
             "usage": {
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
+                "cache_creation_input_tokens": cache_creation_input_tokens,
+                "cache_read_input_tokens": cache_read_input_tokens,
             },
             "generation_duration_seconds": duration_seconds,
             "timing": {

@@ -69,6 +69,7 @@ async def _handle_generate_note(body: dict) -> None:
     note_uuid = uuid.UUID(body["note_id"])
     additional_context = body.get("additional_context", "")
 
+    # Each job runs in a new event loop; pooled connections cannot cross loops.
     engine = create_async_engine(settings.database_url)
     session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 

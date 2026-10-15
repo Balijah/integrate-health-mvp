@@ -1,6 +1,6 @@
 """
 Unit tests for the SQS worker and API enqueue logic.
-No real DB or SQS connections — everything is mocked.
+SQS is mocked; the loop-lifecycle regression uses the test database.
 """
 
 import asyncio
@@ -10,6 +10,16 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.services.note_generation import NoteGenerationError
+
+
+def test_consecutive_jobs_on_separate_event_loops(test_engine):
+    """Real pooled connections must not survive a job's asyncio.run loop."""
+    from app.worker import _handle_generate_note
+
+    with patch("app.worker.get_settings") as settings:
+        settings.return_value.database_url = test_engine.url.render_as_string(hide_password=False)
+        for _ in range(2):
+            asyncio.run(_handle_generate_note({"note_id": str(uuid.uuid4())}))
 
 
 # ---------------------------------------------------------------------------

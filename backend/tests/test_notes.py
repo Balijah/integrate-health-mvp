@@ -373,7 +373,7 @@ class TestGenerateSoapNoteStreaming:
         mock_bedrock = MagicMock()
         mock_bedrock.invoke_model_with_response_stream.return_value = _make_stream_response(_STANDARD_EVENTS)
 
-        with patch("app.services.note_generation.boto3.client", return_value=mock_bedrock):
+        with patch("app.services.note_generation._get_bedrock_client", return_value=mock_bedrock):
             result = generate_soap_note("Doctor: Hello. Patient: I have fatigue.")
 
         assert "subjective" in result
@@ -392,7 +392,7 @@ class TestGenerateSoapNoteStreaming:
             "InvokeModelWithResponseStream",
         )
 
-        with patch("app.services.note_generation.boto3.client", return_value=mock_bedrock):
+        with patch("app.services.note_generation._get_bedrock_client", return_value=mock_bedrock):
             with pytest.raises(NoteGenerationError) as exc_info:
                 generate_soap_note("Doctor: Hello. Patient: I have fatigue.")
 
@@ -407,7 +407,7 @@ class TestGenerateSoapNoteStreaming:
         mock_bedrock = MagicMock()
         mock_bedrock.invoke_model_with_response_stream.return_value = {"body": _ErrorStream()}
 
-        with patch("app.services.note_generation.boto3.client", return_value=mock_bedrock):
+        with patch("app.services.note_generation._get_bedrock_client", return_value=mock_bedrock):
             with pytest.raises(NoteGenerationError) as exc_info:
                 generate_soap_note("Doctor: Hello. Patient: I have fatigue.")
 
@@ -421,7 +421,7 @@ class TestGenerateSoapNoteStreaming:
         mock_bedrock = MagicMock()
         mock_bedrock.invoke_model_with_response_stream.return_value = _make_stream_response(empty_events)
 
-        with patch("app.services.note_generation.boto3.client", return_value=mock_bedrock):
+        with patch("app.services.note_generation._get_bedrock_client", return_value=mock_bedrock):
             with pytest.raises(NoteGenerationError) as exc_info:
                 generate_soap_note("Doctor: Hello. Patient: I have fatigue.")
 
@@ -436,7 +436,7 @@ class TestGenerateSoapNoteStreaming:
         mock_bedrock = MagicMock()
         mock_bedrock.invoke_model_with_response_stream.return_value = _make_stream_response(truncated_events)
 
-        with patch("app.services.note_generation.boto3.client", return_value=mock_bedrock):
+        with patch("app.services.note_generation._get_bedrock_client", return_value=mock_bedrock):
             with pytest.raises(NoteGenerationError):
                 generate_soap_note("Doctor: Hello. Patient: I have fatigue.")
 

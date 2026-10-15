@@ -56,18 +56,31 @@ def _enqueue_note_generation(note_id: str, additional_context: str) -> None:
     logger.info(f"[SQS] Enqueued generate_note for note_id={note_id}")
 
 
+_bg_engine = None
+_bg_session_factory = None
+
+
+def _get_bg_db(database_url: str):
+    """Return a cached async engine and session factory for background tasks."""
+    global _bg_engine, _bg_session_factory
+    if _bg_engine is None:
+        from sqlalchemy.ext.asyncio import (
+            AsyncSession,
+            async_sessionmaker,
+            create_async_engine,
+        )
+        _bg_engine = create_async_engine(database_url)
+        _bg_session_factory = async_sessionmaker(
+            _bg_engine, class_=AsyncSession, expire_on_commit=False,
+        )
+    return _bg_engine, _bg_session_factory
+
+
 async def _run_note_generation(
     note_id: str, transcript: str, additional_context: str, database_url: str
 ) -> None:
     """Background task: run Bedrock generation and update the note record."""
-    from sqlalchemy.ext.asyncio import (
-        AsyncSession,
-        async_sessionmaker,
-        create_async_engine,
-    )
-
-    engine = create_async_engine(database_url)
-    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    _, session_factory = _get_bg_db(database_url)
 
     try:
         content = await asyncio.wait_for(
@@ -97,8 +110,6 @@ async def _run_note_generation(
                     logger.info(f"Note {note_id} updated to status={new_status}")
     except Exception as e:
         logger.error(f"Failed to persist note {note_id} after generation: {e}")
-    finally:
-        await engine.dispose()
 
 
 @router.post(
