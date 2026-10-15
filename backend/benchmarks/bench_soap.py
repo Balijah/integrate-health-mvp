@@ -4,7 +4,8 @@
 Runs generate_soap_note() against a fixed synthetic transcript and reports
 timing breakdown, token usage, and prompt-cache metrics.  Optionally compares
 two saved outputs (before/after) for section completeness and key-fact
-preservation.
+preservation. These synthetic smoke checks do not establish clinical accuracy;
+review generated notes against the transcript before claiming unchanged quality.
 
 Usage:
     # Single run — prints timing to stdout, saves output to a JSON file
@@ -28,6 +29,7 @@ Environment:
 import argparse
 import json
 import os
+import re
 import sys
 import time
 
@@ -41,19 +43,22 @@ EXPECTED_SECTIONS = {"subjective", "objective", "assessment", "plan"}
 EXPECTED_PATIENT_SUMMARY_KEYS = {"title", "visit_summary", "plan_sections"}
 
 KEY_FACTS = [
-    ("subjective", "history_of_present_illness", "fatigue"),
-    ("subjective", "history_of_present_illness", "hair"),
-    ("subjective", "history_of_present_illness", "constipat"),
-    ("subjective", "history_of_present_illness", "sleep"),
-    ("assessment", "diagnoses", "hashimoto"),
-    ("assessment", "diagnoses", "hypothyroid"),
-    ("plan", None, "levothyroxine"),
-    ("plan", None, "vitamin d"),
-    ("plan", None, "iron"),
-    ("plan", None, "ultrasound"),
-    ("plan", None, "6 week"),
-    ("objective", "lab_results", "tsh"),
-    ("objective", "lab_results", "tpo"),
+    ("subjective", "history_of_present_illness", "fatigue", r"\bfatigue\b"),
+    ("subjective", "history_of_present_illness", "hair", r"\bhair\b"),
+    ("subjective", "history_of_present_illness", "constipat", r"\bconstipat"),
+    ("subjective", "history_of_present_illness", "sleep", r"\bsleep\b"),
+    ("assessment", "diagnoses", "hashimoto", r"\bhashimoto"),
+    ("assessment", "diagnoses", "hypothyroid", r"\bhypothyroid"),
+    ("plan", "prescriptions.add", "levothyroxine",
+     r"\blevothyroxine\s+50\s*(?:mcg|micrograms?)\b.*\b(?:daily|every morning)\b"),
+    ("plan", "supplements.add", "vitamin d",
+     r"\bvitamin\s+d3?\s+5,?000\s*iu\b.*\bdaily\b"),
+    ("plan", "supplements.add", "iron",
+     r"\biron\s+bisglycinate\s+25\s*mg\b.*\bevery other day\b"),
+    ("plan", "imaging_or_referrals", "ultrasound", r"\bthyroid ultrasound\b"),
+    ("plan", "follow_up", "6 week", r"\b6[ -]weeks?\b"),
+    ("objective", "lab_results", "tsh", r"\btsh\b[^\d;\n]*\b8\.2\b"),
+    ("objective", "lab_results", "tpo", r"\b(?:tpo|thyroid peroxidase)\b[^\d;\n]*\b342\b"),
 ]
 
 
@@ -65,27 +70,45 @@ def _deep_text(obj) -> str:
         return " ".join(_deep_text(item) for item in obj)
     if isinstance(obj, dict):
         return " ".join(_deep_text(v) for v in obj.values())
-    return str(obj)
+    return "" if obj is None else str(obj)
 
 
 def check_quality(soap: dict) -> dict:
-    """Return a quality report: section completeness and key-fact hits."""
-    present_sections = EXPECTED_SECTIONS.intersection(soap.keys())
+    """Check the fixed synthetic fixture, not general clinical correctness."""
+    present_sections = {
+        key for key in EXPECTED_SECTIONS
+        if isinstance(soap.get(key), dict) and _deep_text(soap[key]).strip()
+    }
     missing_sections = EXPECTED_SECTIONS - present_sections
 
-    has_patient_summary = "patient_summary" in soap
-    ps_keys = set()
-    if has_patient_summary and isinstance(soap["patient_summary"], dict):
-        ps_keys = EXPECTED_PATIENT_SUMMARY_KEYS.intersection(soap["patient_summary"].keys())
+    summary = soap.get("patient_summary")
+    summary = summary if isinstance(summary, dict) else {}
+    ps_keys = {key for key in EXPECTED_PATIENT_SUMMARY_KEYS if _deep_text(summary.get(key)).strip()}
+    sections = summary.get("plan_sections")
+    has_patient_summary = (
+        all(isinstance(summary.get(key), str) and summary[key].strip()
+            for key in ("title", "visit_summary"))
+        and isinstance(sections, list) and bool(sections)
+        and all(isinstance(section, dict)
+                and isinstance(section.get("heading"), str) and section["heading"].strip()
+                and isinstance(section.get("items"), list) and bool(section["items"])
+                and all(isinstance(item, str) and item.strip() for item in section["items"])
+                for section in sections)
+    )
 
     fact_results = []
-    for section, field, keyword in KEY_FACTS:
+    for section, field, keyword, pattern in KEY_FACTS:
         section_data = soap.get(section, {})
-        if field:
-            search_text = _deep_text(section_data.get(field, ""))
-        else:
-            search_text = _deep_text(section_data)
-        found = keyword.lower() in search_text.lower()
+        for key in field.split("."):
+            section_data = section_data.get(key, "") if isinstance(section_data, dict) else ""
+        items = section_data if isinstance(section_data, list) else [section_data]
+        # shortcut: conservative fixture patterns, use clinical review for paraphrases and contradictions.
+        found = any(
+            re.search(pattern, _deep_text(item), re.IGNORECASE)
+            and not re.search(r"\b(?:no|not|never|stop|hold|discontinue|avoid)\b",
+                              _deep_text(item), re.IGNORECASE)
+            for item in items
+        )
         fact_results.append({
             "section": section,
             "field": field,
@@ -95,6 +118,7 @@ def check_quality(soap: dict) -> dict:
 
     facts_found = sum(1 for f in fact_results if f["found"])
     return {
+        "passed": not missing_sections and has_patient_summary and facts_found == len(KEY_FACTS),
         "sections_present": sorted(present_sections),
         "sections_missing": sorted(missing_sections),
         "section_completeness": f"{len(present_sections)}/{len(EXPECTED_SECTIONS)}",
@@ -149,11 +173,12 @@ def run_benchmark(transcript: str, iterations: int = 1) -> list[dict]:
         print(f"  Sections:         {quality['section_completeness']}")
         print(f"  Patient summary:  {'yes' if quality['has_patient_summary'] else 'NO'}")
         print(f"  Key facts:        {quality['key_facts_found']}")
+        print(f"  Smoke checks:     {'PASS' if quality['passed'] else 'FAIL'} (clinical review still required)")
 
     return results
 
 
-def compare_outputs(path_a: str, path_b: str) -> None:
+def compare_outputs(path_a: str, path_b: str) -> bool:
     """Compare two saved benchmark outputs for quality regression."""
     with open(path_a) as f:
         data_a = json.load(f)
@@ -208,6 +233,13 @@ def compare_outputs(path_a: str, path_b: str) -> None:
                 sign = "+" if delta > 0 else ""
                 print(f"    {key:25s}  A={va:>10}  B={vb:>10}  delta={sign}{delta} ({sign}{pct}%)")
 
+    candidate_runs = data_b.get("results", [data_b])
+    passed = bool(candidate_runs) and all(
+        check_quality(run.get("soap_output", {}))["passed"] for run in candidate_runs
+    )
+    print(f"\n  All candidate runs: {'PASS' if passed else 'FAIL'} (clinical review still required)")
+    return passed
+
 
 def main():
     parser = argparse.ArgumentParser(description="Benchmark SOAP note generation")
@@ -218,8 +250,10 @@ def main():
     args = parser.parse_args()
 
     if args.compare:
-        compare_outputs(args.compare[0], args.compare[1])
-        return
+        return 0 if compare_outputs(args.compare[0], args.compare[1]) else 1
+
+    if args.iterations < 1:
+        parser.error("--iterations must be at least 1")
 
     with open(TRANSCRIPT_PATH) as f:
         transcript = f.read()
@@ -235,7 +269,8 @@ def main():
     with open(out_path, "w") as f:
         json.dump({"results": results}, f, indent=2, default=str)
     print(f"\nResults saved to {out_path}")
+    return 0 if all(result["quality"]["passed"] for result in results) else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

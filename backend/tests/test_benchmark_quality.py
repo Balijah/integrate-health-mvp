@@ -7,9 +7,13 @@ These tests verify:
 """
 
 import json
+from copy import deepcopy
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.services.note_generation import generate_soap_note
+from benchmarks.bench_soap import check_quality, compare_outputs, main
 
 
 COMPLETE_SOAP = {
@@ -50,7 +54,7 @@ COMPLETE_SOAP = {
     "plan": {
         "prescriptions": {"add": ["Levothyroxine 50 mcg daily on empty stomach"]},
         "supplements": {
-            "add": ["Iron bisglycinate 25 mg every other day with vitamin C"],
+            "add": ["Iron bisglycinate 25 mg every other day with vitamin C", "Vitamin D 5000 IU daily"],
             "continue": ["Magnesium glycinate 400 mg at night"],
         },
         "lab_orders": ["Reverse T3", "Complete iron panel", "Selenium and zinc levels"],
@@ -97,29 +101,71 @@ class TestQualityChecker:
     """Verify the benchmark quality-check function."""
 
     def test_complete_soap_passes_all_checks(self):
-        import sys
-        import os
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "benchmarks"))
-        from bench_soap import check_quality
-
         report = check_quality(COMPLETE_SOAP)
         assert report["section_completeness"] == "4/4"
         assert report["has_patient_summary"] is True
         assert len(report["sections_missing"]) == 0
 
-        facts_found = sum(1 for f in report["key_facts_detail"] if f["found"])
-        assert facts_found >= 10, f"Expected >=10 key facts, got {facts_found}"
+        assert report["key_facts_found"] == "13/13"
+        assert report["passed"] is True
 
     def test_missing_section_detected(self):
-        import sys
-        import os
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "benchmarks"))
-        from bench_soap import check_quality
-
         incomplete = {k: v for k, v in COMPLETE_SOAP.items() if k != "plan"}
         report = check_quality(incomplete)
         assert "plan" in report["sections_missing"]
         assert report["section_completeness"] == "3/4"
+        assert report["passed"] is False
+
+    @pytest.mark.parametrize("path,value", [
+        (("plan", "prescriptions", "add"), ["Do not start levothyroxine 50 mcg daily"]),
+        (("plan", "prescriptions", "add"), ["Levothyroxine 500 mcg daily"]),
+        (("plan", "prescriptions", "add"), []),
+        (("plan", "supplements", "add"), ["Vitamin D 2000 IU daily", "Iron bisglycinate 25 mg daily"]),
+        (("objective", "lab_results"), "TSH 0.01; TPO negative"),
+        (("objective", "lab_results"), "TSH 18.2; TPO 1342"),
+        (("objective",), {}),
+        (("objective",), None),
+        (("patient_summary",), {}),
+        (("patient_summary",), None),
+        (("patient_summary", "visit_summary"), "  "),
+        (("patient_summary", "plan_sections"), [{"heading": "Medication", "items": []}]),
+    ])
+    def test_incorrect_or_empty_content_fails(self, path, value):
+        soap = deepcopy(COMPLETE_SOAP)
+        parent = soap
+        for key in path[:-1]:
+            parent = parent[key]
+        parent[path[-1]] = value
+        assert check_quality(soap)["passed"] is False
+
+    def test_discontinued_medication_is_not_an_added_prescription(self):
+        soap = deepcopy(COMPLETE_SOAP)
+        soap["plan"]["prescriptions"] = {"discontinue": ["Levothyroxine 50 mcg daily"]}
+        assert check_quality(soap)["passed"] is False
+
+    def test_comparison_checks_later_runs_and_returns_failure(self, tmp_path):
+        baseline = tmp_path / "baseline.json"
+        candidate = tmp_path / "candidate.json"
+        good_run = {"soap_output": COMPLETE_SOAP}
+        baseline.write_text(json.dumps({"results": [good_run]}))
+        candidate.write_text(json.dumps({"results": [good_run]}))
+        assert compare_outputs(baseline, candidate) is True
+        candidate.write_text(json.dumps({"results": [good_run, {"soap_output": {}}]}))
+        with patch("sys.argv", ["bench_soap", "--compare", str(baseline), str(candidate)]):
+            assert main() == 1
+
+    def test_benchmark_returns_failure_and_keeps_report(self, tmp_path):
+        output = tmp_path / "results.json"
+        with patch("sys.argv", ["bench_soap", "--output", str(output)]), patch(
+            "app.services.note_generation.generate_soap_note", return_value={}
+        ):
+            assert main() == 1
+        assert json.loads(output.read_text())["results"][0]["quality"]["passed"] is False
+
+    def test_zero_iterations_rejected(self):
+        with patch("sys.argv", ["bench_soap", "--iterations", "0"]), pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 2
 
 
 class TestPromptCachingStructure:

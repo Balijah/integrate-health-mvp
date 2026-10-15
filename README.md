@@ -69,6 +69,15 @@ npm run build
 
 CI also runs Gitleaks secret scanning. Backend CI applies migrations against PostgreSQL before running tests and enforces the current coverage floor.
 
+For an optional paid Bedrock benchmark, run `python benchmarks/bench_soap.py --iterations 3 --output /tmp/soap-benchmark.json`
+from `backend/` with an explicitly selected development AWS profile. It uses the bundled synthetic transcript and saves
+timings, cache metrics, and generated output. `--compare baseline.json optimized.json` compares saved runs.
+Both modes exit nonzero when candidate outputs fail the synthetic smoke checks (sections, summary, and selected
+facts including medication actions/doses and lab values). These conservative checks can reject valid paraphrases
+and cannot establish clinical accuracy; review generated output against the transcript. Speed gains and unchanged
+clinical quality require live before/after validation. Worker database connections remain scoped to each job because
+each job runs in a separate event loop.
+
 ## Project layout
 
 ```text
