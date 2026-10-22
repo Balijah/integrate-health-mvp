@@ -28,7 +28,7 @@ jobs:
           pip install pip-audit
           pip-audit -r requirements.txt --format=markdown \
             --output=../python-vulnerabilities.md || true
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "20"
       - name: npm audit
