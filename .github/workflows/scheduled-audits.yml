@@ -19,7 +19,7 @@ jobs:
     if: ${{ github.event.inputs.audit_type == 'all' || github.event.inputs.audit_type == 'dependencies' || github.event_name == 'schedule' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - name: Python dependency scan
@@ -50,7 +50,7 @@ jobs:
     if: ${{ github.event.inputs.audit_type == 'all' || github.event.inputs.audit_type == 'security' || github.event_name == 'schedule' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - name: Bandit scan
